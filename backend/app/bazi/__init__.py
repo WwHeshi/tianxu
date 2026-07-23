@@ -1,0 +1,1 @@
+"""Deterministic BaZi calculation adapter."""
