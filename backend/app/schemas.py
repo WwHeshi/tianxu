@@ -3,9 +3,8 @@
 from datetime import datetime
 from enum import Enum
 from typing import Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .bazi.policy import CalculationPolicy
 
@@ -16,37 +15,76 @@ class Gender(str, Enum):
     other = "other"
 
 
-class BirthInput(BaseModel):
-    """User-supplied civil birth information.
-
-    ``local_datetime`` may be naive (interpreted in ``timezone``) or include
-    an offset (converted into ``timezone`` before calculation).
-    """
+class Birthplace(BaseModel):
+    """A province/city/district selection using Chinese administrative codes."""
 
     model_config = ConfigDict(extra="forbid")
 
-    local_datetime: datetime
-    timezone: str = Field(min_length=1, max_length=64)
+    country_code: Literal["CN"] = "CN"
+    province_code: str = Field(pattern=r"^\d{6}$")
+    province_name: str = Field(min_length=1, max_length=32)
+    city_code: str | None = Field(default=None, pattern=r"^\d{6}$")
+    city_name: str | None = Field(default=None, min_length=1, max_length=64)
+    district_code: str = Field(pattern=r"^\d{6}$")
+    district_name: str = Field(min_length=1, max_length=64)
+
+    @field_validator("province_name", "district_name")
+    @classmethod
+    def strip_names(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("city_name")
+    @classmethod
+    def strip_optional_city_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_code_hierarchy(self) -> "Birthplace":
+        province_prefix = self.province_code[:2]
+        if (self.city_code is None) != (self.city_name is None):
+            raise ValueError("城市代码和城市名称必须同时提供或同时省略")
+        if self.city_code is not None and not self.city_code.startswith(province_prefix):
+            raise ValueError("城市代码与省级行政区不匹配")
+        if not self.district_code.startswith(province_prefix):
+            raise ValueError("区县代码与省级行政区不匹配")
+        return self
+
+
+class BirthInput(BaseModel):
+    """Birth information entered using the Beijing standard-time clock."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    beijing_datetime: datetime
+    birthplace: Birthplace
     gender: Gender
-    longitude: float | None = Field(default=None, ge=-180, le=180)
     calculation_policy: CalculationPolicy = Field(default_factory=CalculationPolicy)
 
-    @field_validator("timezone")
+    @field_validator("beijing_datetime")
     @classmethod
-    def validate_timezone(cls, value: str) -> str:
-        try:
-            ZoneInfo(value)
-        except (ZoneInfoNotFoundError, ValueError):
-            raise ValueError("时区必须是有效的 IANA 时区，例如 Asia/Shanghai")
+    def require_naive_beijing_datetime(cls, value: datetime) -> datetime:
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            raise ValueError("北京时间请直接填写钟表时间，不要附带时区或 UTC 偏移")
         return value
 
 
 class NormalizedBirthInput(BaseModel):
-    local_datetime: datetime
-    utc_datetime: datetime
-    timezone: str
+    beijing_datetime: datetime
+    true_solar_datetime: datetime
+    birthplace: Birthplace
     gender: Gender
-    longitude: float | None = None
+
+
+class SolarTimeAdjustment(BaseModel):
+    longitude_degrees: float
+    latitude_degrees: float | None = None
+    reference_meridian_degrees: float
+    longitude_correction_minutes: float
+    equation_of_time_minutes: float
+    total_correction_minutes: float
+    location_precision: str
+    coordinate_match: str
+    coordinate_source: str
 
 
 class Component(BaseModel):
@@ -100,13 +138,14 @@ class EngineInfo(BaseModel):
     name: str
     version: str
     policy_version: str
-    timezone_note: str
+    solar_time_note: str
 
 
 class ChartPreviewResponse(BaseModel):
     normalized_input: NormalizedBirthInput
     chart: Chart
     calculation_policy: CalculationPolicy
+    solar_time_adjustment: SolarTimeAdjustment
     engine: EngineInfo
     warnings: list[str]
     limitations: list[str]

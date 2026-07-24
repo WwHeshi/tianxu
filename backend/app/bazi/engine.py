@@ -6,9 +6,9 @@ model.  The API receives a stable, JSON-friendly representation instead.
 
 from __future__ import annotations
 
-from datetime import timezone as datetime_timezone
+from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
-from zoneinfo import ZoneInfo
+from math import cos, pi, sin
 
 from lunar_python import Solar
 from lunar_python.util import LunarUtil
@@ -25,7 +25,9 @@ from ..schemas import (
     NormalizedBirthInput,
     Pillar,
     Pillars,
+    SolarTimeAdjustment,
 )
+from .locations import BirthplaceCoordinateError, get_district_coordinate
 
 
 class ChartCalculationError(RuntimeError):
@@ -52,10 +54,14 @@ SHI_SHEN = dict(LunarUtil.SHI_SHEN)
 GAN_POLARITY = {gan: ("yang" if index % 2 == 0 else "yin") for index, gan in enumerate(GAN)}
 ZHI_POLARITY = {zhi: ("yang" if index % 2 == 0 else "yin") for index, zhi in enumerate(ZHI)}
 
-TIMEZONE_NOTE = "排盘使用所选 IANA 时区的当地民用时间，当前不应用经度真太阳时校正。"
+SOLAR_TIME_NOTE = (
+    "用户输入北京时间；系统按出生地正式末级行政中心经度进行经度修正，"
+    "并使用 NOAA 近似公式计算均时差后得到真太阳时。"
+)
 LIMITATIONS = [
-    "规则 v1 使用当地民用时间，并在当地 00:00 换日；当前未启用真太阳时校正。",
-    "节气表由排盘库提供，非 Asia/Shanghai 时区或节气交界附近的时间仍需独立样例复核。",
+    "经度取正式末级行政中心点；同一行政区内的实际出生地点仍可能带来少量时间误差。",
+    "规则 v1 使用真太阳时并在 00:00 换日；接近换日、时辰或节气边界时应结合具体地址复核。",
+    "均时差使用 NOAA 近似公式，节气表由排盘库提供，边界样例仍需独立历书交叉校验。",
     "性别当前仅用于记录，v1 尚未计算大运、起运和流年。",
     "五行分布是不加权计数，不代表旺衰或强弱评分。",
 ]
@@ -65,43 +71,78 @@ def _element_counts() -> dict[str, int]:
     return {element: 0 for element in ELEMENTS}
 
 
-def _normalize_birth(birth: BirthInput) -> tuple[NormalizedBirthInput, list[str]]:
-    zone = ZoneInfo(birth.timezone)
-    local = birth.local_datetime
-    warnings: list[str] = []
-    if local.tzinfo is None:
-        # ZoneInfo accepts nonexistent/ambiguous wall times without raising.
-        # Round-tripping both folds lets us reject a spring-forward gap and make
-        # the fall-back choice explicit and deterministic.
-        candidates = [local.replace(tzinfo=zone, fold=fold) for fold in (0, 1)]
-        valid = [
-            candidate
-            for candidate in candidates
-            if candidate.astimezone(datetime_timezone.utc)
-            .astimezone(zone)
-            .replace(tzinfo=None)
-            == local
-        ]
-        if not valid:
-            raise ChartCalculationError("出生时间在所选时区不存在（夏令时切换造成的时间缺口）")
-        if len(valid) == 2 and valid[0].utcoffset() != valid[1].utcoffset():
-            warnings.append("出生时间在夏令时回拨区间内，已采用较早的一次（fold=0）")
-        local = valid[0]
-    else:
-        local = local.astimezone(zone)
-        if local.fold:
-            warnings.append("输入偏移选择了夏令时回拨区间中的较晚一次")
-    utc = local.astimezone(datetime_timezone.utc)
-    return (
-        NormalizedBirthInput(
-            local_datetime=local,
-            utc_datetime=utc,
-            timezone=birth.timezone,
-            gender=birth.gender,
-            longitude=birth.longitude,
-        ),
-        warnings,
+def _equation_of_time_minutes(value: datetime) -> float:
+    """Return NOAA's fractional-year approximation of the equation of time."""
+
+    day_of_year = value.timetuple().tm_yday
+    fractional_hour = value.hour + value.minute / 60 + value.second / 3600
+    gamma = 2 * pi / 365 * (day_of_year - 1 + (fractional_hour - 12) / 24)
+    return 229.18 * (
+        0.000075
+        + 0.001868 * cos(gamma)
+        - 0.032077 * sin(gamma)
+        - 0.014615 * cos(2 * gamma)
+        - 0.040849 * sin(2 * gamma)
     )
+
+
+def _round_to_second(value: datetime) -> datetime:
+    if value.microsecond >= 500_000:
+        value += timedelta(seconds=1)
+    return value.replace(microsecond=0)
+
+
+def _minutes_from_pillar_boundary(value: datetime) -> float:
+    minute_of_day = value.hour * 60 + value.minute + value.second / 60
+    # Day changes at 00:00; two-hour branches change at each odd-numbered hour.
+    boundaries = (0, *(hour * 60 for hour in range(1, 24, 2)), 24 * 60)
+    return min(abs(minute_of_day - boundary) for boundary in boundaries)
+
+
+def _normalize_birth(
+    birth: BirthInput,
+) -> tuple[NormalizedBirthInput, SolarTimeAdjustment, list[str]]:
+    try:
+        coordinate = get_district_coordinate(birth.birthplace)
+    except BirthplaceCoordinateError as exc:
+        raise ChartCalculationError(str(exc)) from exc
+    if coordinate.fallback or coordinate.coordinate_match.endswith("_fallback"):
+        raise ChartCalculationError(
+            f"该出生地区缺少独立坐标，系统禁止使用回退坐标："
+            f"{birth.birthplace.district_name}（{birth.birthplace.district_code}）"
+        )
+
+    longitude_correction = 4 * (coordinate.longitude - coordinate.reference_meridian)
+    equation_of_time = _equation_of_time_minutes(birth.beijing_datetime)
+    total_correction = longitude_correction + equation_of_time
+    true_solar_datetime = _round_to_second(
+        birth.beijing_datetime + timedelta(minutes=total_correction)
+    )
+
+    warnings: list[str] = []
+    if _minutes_from_pillar_boundary(true_solar_datetime) <= 10:
+        warnings.append("真太阳时接近换日或时辰边界，建议使用更具体的出生地址复核")
+
+    normalized = NormalizedBirthInput(
+        beijing_datetime=birth.beijing_datetime,
+        true_solar_datetime=true_solar_datetime,
+        birthplace=birth.birthplace,
+        gender=birth.gender,
+    )
+    adjustment = SolarTimeAdjustment(
+        longitude_degrees=round(coordinate.longitude, 6),
+        latitude_degrees=(
+            round(coordinate.latitude, 6) if coordinate.latitude is not None else None
+        ),
+        reference_meridian_degrees=coordinate.reference_meridian,
+        longitude_correction_minutes=round(longitude_correction, 6),
+        equation_of_time_minutes=round(equation_of_time, 6),
+        total_correction_minutes=round(total_correction, 6),
+        location_precision=coordinate.precision,
+        coordinate_match=coordinate.coordinate_match,
+        coordinate_source=coordinate.source,
+    )
+    return normalized, adjustment, warnings
 
 
 def _component(symbol: str, *, ten_god: str | None = None) -> Component:
@@ -160,17 +201,18 @@ def _pillar(name: str, gan_zhi: str, day_master: str) -> Pillar:
 def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
     """Calculate a chart with a deterministic, versioned policy."""
 
-    normalized, warnings = _normalize_birth(birth)
-    local = normalized.local_datetime
+    normalized, solar_time_adjustment, warnings = _normalize_birth(birth)
+    true_solar = normalized.true_solar_datetime
     try:
-        # lunar-python accepts civil calendar components, not a timezone object.
+        # The selected policy applies the corrected apparent-solar wall clock to
+        # all four pillar boundaries. lunar-python accepts calendar components.
         solar = Solar.fromYmdHms(
-            local.year,
-            local.month,
-            local.day,
-            local.hour,
-            local.minute,
-            local.second,
+            true_solar.year,
+            true_solar.month,
+            true_solar.day,
+            true_solar.hour,
+            true_solar.minute,
+            true_solar.second,
         )
         eight_char = solar.getLunar().getEightChar()
         # Sect 2 is the library's midnight rollover convention (our v1 policy).
@@ -204,11 +246,6 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
             hidden_counts[hidden_stem.element] += 1
     total = {element: visible[element] + hidden_counts[element] for element in ELEMENTS}
 
-    if birth.longitude is not None:
-        warnings.append("已记录经度，但规则 v1 未启用真太阳时，因此本次未参与计算")
-    if birth.local_datetime.tzinfo is not None:
-        warnings.append("输入包含时区偏移，已转换为所选 IANA 时区后计算")
-
     return ChartPreviewResponse(
         normalized_input=normalized,
         chart=Chart(
@@ -221,11 +258,12 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
             ),
         ),
         calculation_policy=birth.calculation_policy,
+        solar_time_adjustment=solar_time_adjustment,
         engine=EngineInfo(
             name=ENGINE_NAME,
             version=ENGINE_VERSION,
             policy_version=birth.calculation_policy.version,
-            timezone_note=TIMEZONE_NOTE,
+            solar_time_note=SOLAR_TIME_NOTE,
         ),
         warnings=warnings,
         limitations=LIMITATIONS,

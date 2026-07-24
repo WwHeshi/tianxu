@@ -24,4 +24,3 @@ def preview_chart(payload: BirthInput) -> ChartPreviewResponse:
         return calculate_chart(payload)
     except ChartCalculationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-

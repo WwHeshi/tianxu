@@ -5,16 +5,25 @@ export interface CalculationPolicyInput {
   year_boundary: "lichun";
   month_boundary: "solar_terms";
   day_boundary: "midnight";
-  time_basis: "local_civil_time";
-  true_solar_time: false;
+  time_basis: "beijing_standard_time";
+  true_solar_time: true;
 }
 
 export interface ChartPreviewRequest {
-  local_datetime: string;
-  timezone: string;
+  beijing_datetime: string;
+  birthplace: BirthplaceInput;
   gender: Gender;
-  longitude?: number;
   calculation_policy?: CalculationPolicyInput;
+}
+
+export interface BirthplaceInput {
+  country_code: "CN";
+  province_code: string;
+  province_name: string;
+  city_code: string | null;
+  city_name: string | null;
+  district_code: string;
+  district_name: string;
 }
 
 export interface PillarDetail {
@@ -55,11 +64,22 @@ export interface CalculationPolicy {
 }
 
 export interface NormalizedBirthInfo {
-  local_datetime: string;
-  utc_datetime: string;
-  timezone: string;
+  beijing_datetime: string;
+  true_solar_datetime: string;
+  birthplace: BirthplaceInput;
   gender: Gender | "other";
-  longitude?: number | null;
+}
+
+export interface SolarTimeAdjustment {
+  longitude_degrees: number;
+  latitude_degrees: number | null;
+  reference_meridian_degrees: number;
+  longitude_correction_minutes: number;
+  equation_of_time_minutes: number;
+  total_correction_minutes: number;
+  location_precision: string;
+  coordinate_match: string;
+  coordinate_source: string;
 }
 
 export interface ChartPreview {
@@ -70,11 +90,12 @@ export interface ChartPreview {
     element_distribution: ElementDistribution;
   };
   calculation_policy: CalculationPolicy;
+  solar_time_adjustment: SolarTimeAdjustment;
   engine: {
     name: string;
     version: string;
     policy_version: string;
-    timezone_note: string;
+    solar_time_note: string;
   };
   warnings: string[];
   limitations: string[];

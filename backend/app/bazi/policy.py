@@ -18,8 +18,8 @@ class CalculationPolicy(BaseModel):
     year_boundary: Literal["lichun"] = "lichun"
     month_boundary: Literal["solar_terms"] = "solar_terms"
     day_boundary: Literal["midnight"] = "midnight"
-    time_basis: Literal["local_civil_time"] = "local_civil_time"
-    true_solar_time: Literal[False] = False
+    time_basis: Literal["beijing_standard_time"] = "beijing_standard_time"
+    true_solar_time: Literal[True] = True
 
 
 DEFAULT_POLICY = CalculationPolicy()

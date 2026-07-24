@@ -13,9 +13,17 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { previewChart } from "@/lib/api";
+import {
+  CHINA_PROVINCES,
+  formatChinaBirthplace,
+  getChinaDistricts,
+  getChinaSecondLevelAreas,
+  resolveChinaBirthplace,
+} from "@/lib/china-areas";
 import type {
+  BirthplaceInput,
   CalculationPolicy,
   ChartPreview,
   ChartPreviewRequest,
@@ -31,37 +39,33 @@ const PILLARS: Array<{ key: PillarKey; label: string; description: string }> = [
   { key: "hour", label: "时柱", description: "后天与志向" },
 ];
 
-const TIMEZONE_OPTIONS = [
-  "Asia/Shanghai",
-  "Asia/Hong_Kong",
-  "Asia/Taipei",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Asia/Seoul",
-  "Asia/Urumqi",
-  "UTC",
-  "Europe/London",
-  "Europe/Paris",
-  "America/New_York",
-  "America/Los_Angeles",
-  "Australia/Sydney",
-];
-
 const DEFAULT_POLICY = {
   version: "v1" as const,
   year_boundary: "lichun" as const,
   month_boundary: "solar_terms" as const,
   day_boundary: "midnight" as const,
-  time_basis: "local_civil_time" as const,
-  true_solar_time: false as const,
+  time_basis: "beijing_standard_time" as const,
+  true_solar_time: true as const,
 };
 
 const POLICY_LABELS: Record<string, string> = {
   v1: "规则 v1",
   lichun: "立春分年",
   solar_terms: "节气分月",
-  midnight: "当地 00:00 换日",
-  local_civil_time: "当地民用时间",
+  midnight: "真太阳时 00:00 换日",
+  beijing_standard_time: "北京时间",
+};
+
+const LOCATION_PRECISION_LABELS: Record<string, string> = {
+  district_centroid: "区县中心点",
+  district_center: "区县中心点",
+  administrative_center: "行政中心点",
+  city_center: "城市行政中心",
+};
+
+const COORDINATE_MATCH_LABELS: Record<string, string> = {
+  direct_code: "正式区划代码",
+  official_mca_api: "民政部国家地名信息库",
 };
 
 function readable(value: unknown, fallback = "暂未提供"): string {
@@ -77,10 +81,38 @@ function readable(value: unknown, fallback = "暂未提供"): string {
   return fallback;
 }
 
-function formatLocalDateTime(value: unknown): string {
+function formatDateTime(value: unknown): string {
   const text = readable(value, "");
   if (!text) return "暂未提供";
-  return text.replace("T", " ").replace(/:00(?=([+-]\d{2}:\d{2}|Z)?$)/, "");
+  return text
+    .replace("T", " ")
+    .replace(/([+-]\d{2}:\d{2}|Z)$/, "")
+    .replace(/:00$/, "");
+}
+
+function formatLongitude(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "暂未提供";
+  const direction = value >= 0 ? "E" : "W";
+  const degrees = Math.abs(value).toFixed(4).replace(/\.?0+$/, "");
+  return `${degrees}°${direction}`;
+}
+
+function formatMinutes(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "暂未提供";
+  const minutes = value.toFixed(2);
+  return `${value > 0 ? "+" : ""}${minutes} 分钟`;
+}
+
+function formatLocationPrecision(value: unknown): string {
+  const precision = readable(value, "");
+  if (!precision) return "暂未提供";
+  return LOCATION_PRECISION_LABELS[precision] ?? precision;
+}
+
+function formatCoordinateMatch(value: unknown): string {
+  const match = readable(value, "");
+  if (!match) return "暂未提供";
+  return COORDINATE_MATCH_LABELS[match] ?? match;
 }
 
 function getPillar(chart: ChartPreview, key: PillarKey, index: number): Partial<PillarDetail> {
@@ -126,10 +158,11 @@ function todayString(): string {
 }
 
 export function BaziWorkbench() {
-  const [birthDate, setBirthDate] = useState("");
+  const [birthDate, setBirthDate] = useState("1990-01-01");
   const [birthTime, setBirthTime] = useState("12:00");
-  const [timezone, setTimezone] = useState("Asia/Shanghai");
-  const [timezoneOptions, setTimezoneOptions] = useState(TIMEZONE_OPTIONS);
+  const [provinceCode, setProvinceCode] = useState("");
+  const [secondLevelCode, setSecondLevelCode] = useState("");
+  const [districtCode, setDistrictCode] = useState("");
   const [gender, setGender] = useState<Gender>("male");
   const [chart, setChart] = useState<ChartPreview | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -138,16 +171,30 @@ export function BaziWorkbench() {
   const [lastRequest, setLastRequest] = useState<ChartPreviewRequest | null>(null);
 
   const maxDate = useMemo(() => todayString(), []);
+  const secondLevelOptions = useMemo(
+    () => getChinaSecondLevelAreas(provinceCode),
+    [provinceCode],
+  );
+  const selectedSecondLevel = secondLevelOptions.find(
+    (item) => item.code === secondLevelCode,
+  );
+  const districtOptions = useMemo(
+    () => getChinaDistricts(secondLevelCode),
+    [secondLevelCode],
+  );
 
-  useEffect(() => {
-    // Keep the explicit IANA value visible while still using a visitor's zone when available.
-    const supported = typeof Intl.supportedValuesOf === "function"
-      ? Intl.supportedValuesOf("timeZone")
-      : TIMEZONE_OPTIONS;
-    setTimezoneOptions(Array.from(new Set([...TIMEZONE_OPTIONS, ...supported])));
-    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (detected) setTimezone(detected);
-  }, []);
+  function handleProvinceChange(nextProvinceCode: string) {
+    const nextAreas = getChinaSecondLevelAreas(nextProvinceCode);
+    setProvinceCode(nextProvinceCode);
+    setSecondLevelCode(nextAreas.length === 1 ? nextAreas[0].code : "");
+    setDistrictCode("");
+  }
+
+  function handleSecondLevelChange(nextSecondLevelCode: string) {
+    const nextDistricts = getChinaDistricts(nextSecondLevelCode);
+    setSecondLevelCode(nextSecondLevelCode);
+    setDistrictCode(nextDistricts.length === 1 ? nextDistricts[0].code : "");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -159,9 +206,24 @@ export function BaziWorkbench() {
       return;
     }
 
+    const resolvedBirthplace = resolveChinaBirthplace(
+      provinceCode,
+      secondLevelCode,
+      districtCode,
+    );
+    if (!resolvedBirthplace) {
+      setFormError("请选择完整的出生地区。");
+      return;
+    }
+
+    const birthplace: BirthplaceInput = {
+      country_code: "CN",
+      ...resolvedBirthplace,
+    };
+
     const request: ChartPreviewRequest = {
-      local_datetime: `${birthDate}T${birthTime}:00`,
-      timezone,
+      beijing_datetime: `${birthDate}T${birthTime}:00`,
+      birthplace,
       gender,
       calculation_policy: DEFAULT_POLICY,
     };
@@ -206,7 +268,7 @@ export function BaziWorkbench() {
             </div>
             <span className="step-badge">01 / 01</span>
           </div>
-          <p className="panel-intro">使用当地民用时间，结果会记录本次计算口径。</p>
+          <p className="panel-intro">出生时间按北京时间填写，系统会根据出生区县校正为真太阳时。</p>
 
           <form onSubmit={handleSubmit} noValidate>
             <div className="field-grid">
@@ -222,7 +284,7 @@ export function BaziWorkbench() {
                 />
               </label>
               <label className="field field-wide">
-                <span className="field-label"><Clock3 size={15} aria-hidden="true" /> 出生时间</span>
+                <span className="field-label"><Clock3 size={15} aria-hidden="true" /> 出生时间（北京时间）</span>
                 <input
                   type="time"
                   value={birthTime}
@@ -231,14 +293,44 @@ export function BaziWorkbench() {
                   aria-required="true"
                 />
               </label>
-              <label className="field field-wide">
-                <span className="field-label"><MapPin size={15} aria-hidden="true" /> IANA 时区</span>
-                <select value={timezone} onChange={(event) => setTimezone(event.target.value)}>
-                  {!timezoneOptions.includes(timezone) && <option value={timezone}>{timezone}</option>}
-                  {timezoneOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-                <span className="field-hint">例如 Asia/Shanghai</span>
-              </label>
+              <div className="field field-wide">
+                <span className="field-label"><MapPin size={15} aria-hidden="true" /> 出生地点</span>
+                <div className="location-selects">
+                  <select
+                    value={provinceCode}
+                    onChange={(event) => handleProvinceChange(event.target.value)}
+                    aria-label="出生省份"
+                  >
+                    <option value="">请选择省份 / 直辖市</option>
+                    {CHINA_PROVINCES.map((province) => (
+                      <option key={province.code} value={province.code}>{province.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={secondLevelCode}
+                    onChange={(event) => handleSecondLevelChange(event.target.value)}
+                    disabled={!provinceCode}
+                    aria-label="出生城市或区县"
+                  >
+                    <option value="">请选择城市 / 区县</option>
+                    {secondLevelOptions.map((area) => (
+                      <option key={area.code} value={area.code}>{area.name}</option>
+                    ))}
+                  </select>
+                  {selectedSecondLevel && !selectedSecondLevel.isTerminal && (
+                    <select
+                      value={districtCode}
+                      onChange={(event) => setDistrictCode(event.target.value)}
+                      aria-label="出生区县"
+                    >
+                      <option value="">请选择区 / 县</option>
+                      {districtOptions.map((district) => (
+                        <option key={district.code} value={district.code}>{district.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
               <fieldset className="field field-wide gender-field">
                 <legend className="field-label">性别</legend>
                 <div className="segmented-control" role="radiogroup" aria-label="性别">
@@ -323,7 +415,7 @@ function LoadingState() {
     <div className="state-block loading-state">
       <LoaderCircle className="spin" size={24} strokeWidth={1.7} aria-hidden="true" />
       <p className="state-title">正在计算四柱</p>
-      <p className="state-copy">正在校验节气边界与时区。</p>
+      <p className="state-copy">正在计算出生地经度修正与均时差。</p>
     </div>
   );
 }
@@ -346,12 +438,15 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
   const limitations = Array.isArray(chart.limitations) ? chart.limitations : [];
   const warnings = Array.isArray(chart.warnings) ? chart.warnings : [];
   const maxElementCount = Math.max(1, ...Object.values(distribution));
+  const birthplace = formatChinaBirthplace(normalized.birthplace);
+  const solarTime = chart.solar_time_adjustment;
 
   return (
     <div className="chart-content">
       <div className="meta-strip">
-        <div><span>出生时间</span><strong>{formatLocalDateTime(normalized.local_datetime)}</strong></div>
-        <div><span>时区</span><strong>{readable(normalized.timezone)}</strong></div>
+        <div><span>北京时间</span><strong>{formatDateTime(normalized.beijing_datetime)}</strong></div>
+        <div><span>真太阳时</span><strong>{formatDateTime(normalized.true_solar_datetime)}</strong></div>
+        <div><span>出生地点</span><strong className="meta-value-wrap">{birthplace}</strong></div>
         <div><span>性别</span><strong>{normalized.gender === "female" ? "女" : "男"}</strong></div>
       </div>
 
@@ -378,6 +473,23 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
             );
           })}
         </div>
+      </section>
+
+      <section className="solar-time-section" aria-labelledby="solar-time-title">
+        <div className="section-heading">
+          <h3 id="solar-time-title">真太阳时校正</h3>
+          <span>{formatDateTime(normalized.beijing_datetime)} → {formatDateTime(normalized.true_solar_datetime)}</span>
+        </div>
+        <dl className="solar-time-grid">
+          <div><dt>出生地经度</dt><dd>{formatLongitude(solarTime?.longitude_degrees)}</dd></div>
+          <div><dt>标准经线</dt><dd>{formatLongitude(solarTime?.reference_meridian_degrees)}</dd></div>
+          <div><dt>经度修正</dt><dd>{formatMinutes(solarTime?.longitude_correction_minutes)}</dd></div>
+          <div><dt>均时差</dt><dd>{formatMinutes(solarTime?.equation_of_time_minutes)}</dd></div>
+          <div><dt>总修正</dt><dd>{formatMinutes(solarTime?.total_correction_minutes)}</dd></div>
+          <div><dt>地点精度</dt><dd>{formatLocationPrecision(solarTime?.location_precision)}</dd></div>
+          <div><dt>坐标匹配</dt><dd>{formatCoordinateMatch(solarTime?.coordinate_match)}</dd></div>
+          <div><dt>坐标数据</dt><dd>{readable(solarTime?.coordinate_source)}</dd></div>
+        </dl>
       </section>
 
       <div className="detail-grid">
