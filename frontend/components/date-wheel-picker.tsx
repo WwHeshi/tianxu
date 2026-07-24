@@ -2,15 +2,26 @@
 
 import { ChevronDown } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  formatLunarDate,
+  formatSolarDate,
+  getLunarMonths,
+  lunarDayLabel,
+  parseSolarDate,
+  solarToLunar,
+  type CalendarType,
+  type LunarDateParts,
+  type LunarMonthInfo,
+  type SolarDateParts,
+} from "@/lib/lunar-calendar";
 
 const ITEM_HEIGHT = 40;
-const MIN_YEAR = 1900;
+const MIN_SOLAR_DATE: SolarDateParts = { year: 1900, month: 1, day: 1 };
+const MIN_LUNAR_DATE = solarToLunar(MIN_SOLAR_DATE);
 
-interface DateParts {
-  year: number;
-  month: number;
-  day: number;
-}
+export type CalendarDateValue = LunarDateParts;
+
+type WheelDateDraft = SolarDateParts;
 
 interface WheelOption {
   value: number;
@@ -25,9 +36,10 @@ interface WheelColumnProps {
 }
 
 interface DateWheelPickerProps {
-  value: string;
+  calendarType: CalendarType;
+  value: CalendarDateValue;
   maxDate: string;
-  onChange: (value: string) => void;
+  onChange: (value: CalendarDateValue) => void;
   labelledBy: string;
 }
 
@@ -50,27 +62,8 @@ function daysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
 }
 
-function parseDate(value: string): DateParts | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return null;
-  const parts = {
-    year: Number(match[1]),
-    month: Number(match[2]),
-    day: Number(match[3]),
-  };
-  if (
-    parts.month < 1 ||
-    parts.month > 12 ||
-    parts.day < 1 ||
-    parts.day > daysInMonth(parts.year, parts.month)
-  ) {
-    return null;
-  }
-  return parts;
-}
-
-function clampDate(parts: DateParts, maximum: DateParts): DateParts {
-  const year = Math.min(Math.max(parts.year, MIN_YEAR), maximum.year);
+function clampSolarDate(parts: WheelDateDraft, maximum: SolarDateParts): WheelDateDraft {
+  const year = Math.min(Math.max(parts.year, MIN_SOLAR_DATE.year), maximum.year);
   const lastMonth = year === maximum.year ? maximum.month : 12;
   const month = Math.min(Math.max(parts.month, 1), lastMonth);
   const naturalLastDay = daysInMonth(year, month);
@@ -85,12 +78,85 @@ function clampDate(parts: DateParts, maximum: DateParts): DateParts {
   };
 }
 
-function formatDate(parts: DateParts): string {
-  return [
-    `${parts.year}`.padStart(4, "0"),
-    `${parts.month}`.padStart(2, "0"),
-    `${parts.day}`.padStart(2, "0"),
-  ].join("-");
+function signedLunarMonth(date: LunarDateParts): number {
+  return date.isLeapMonth ? -date.month : date.month;
+}
+
+function lunarMonthIndex(months: readonly LunarMonthInfo[], date: LunarDateParts): number {
+  const index = months.findIndex(
+    (month) => month.signedMonth === signedLunarMonth(date),
+  );
+  if (index < 0) {
+    throw new RangeError(`无法匹配农历边界月份：${date.year}年${signedLunarMonth(date)}月`);
+  }
+  return index;
+}
+
+function lunarMonthsInRange(
+  year: number,
+  minimum: LunarDateParts,
+  maximum: LunarDateParts,
+): LunarMonthInfo[] {
+  if (year < minimum.year || year > maximum.year) return [];
+
+  const months = getLunarMonths(year);
+  let firstIndex = 0;
+  let lastIndex = months.length - 1;
+
+  if (year === minimum.year) {
+    firstIndex = lunarMonthIndex(months, minimum);
+  }
+  if (year === maximum.year) {
+    lastIndex = lunarMonthIndex(months, maximum);
+  }
+
+  return months.slice(firstIndex, lastIndex + 1);
+}
+
+function lunarDaysInRange(
+  year: number,
+  month: LunarMonthInfo,
+  minimum: LunarDateParts,
+  maximum: LunarDateParts,
+): number[] {
+  let firstDay = 1;
+  let lastDay = month.dayCount;
+  if (year === minimum.year && month.signedMonth === signedLunarMonth(minimum)) {
+    firstDay = minimum.day;
+  }
+  if (year === maximum.year && month.signedMonth === signedLunarMonth(maximum)) {
+    lastDay = maximum.day;
+  }
+  return range(firstDay, lastDay);
+}
+
+function nearestNumber(values: number[], requested: number): number {
+  return values.reduce((nearest, value) =>
+    Math.abs(value - requested) < Math.abs(nearest - requested) ? value : nearest,
+  );
+}
+
+function clampLunarDate(
+  parts: WheelDateDraft,
+  minimum: LunarDateParts,
+  maximum: LunarDateParts,
+): WheelDateDraft {
+  const year = Math.min(Math.max(parts.year, minimum.year), maximum.year);
+  const months = lunarMonthsInRange(year, minimum, maximum);
+  const selectedMonth =
+    months.find((month) => month.signedMonth === parts.month) ??
+    months.reduce((nearest, month) =>
+      Math.abs(Math.abs(month.signedMonth) - Math.abs(parts.month)) <
+      Math.abs(Math.abs(nearest.signedMonth) - Math.abs(parts.month))
+        ? month
+        : nearest,
+    );
+  const days = lunarDaysInRange(year, selectedMonth, minimum, maximum);
+  return {
+    year,
+    month: selectedMonth.signedMonth,
+    day: nearestNumber(days, parts.day),
+  };
 }
 
 function parseTime(value: string): TimeParts | null {
@@ -186,36 +252,77 @@ function WheelColumn({ label, options, value, onChange }: WheelColumnProps) {
   );
 }
 
-export function DateWheelPicker({ value, maxDate, onChange, labelledBy }: DateWheelPickerProps) {
-  const maximum = useMemo(
-    () => parseDate(maxDate) ?? { year: new Date().getFullYear(), month: 12, day: 31 },
-    [maxDate],
-  );
-  const initial = useMemo(
-    () => clampDate(parseDate(value) ?? maximum, maximum),
-    [maximum, value],
-  );
+export function DateWheelPicker({
+  calendarType,
+  value,
+  maxDate,
+  onChange,
+  labelledBy,
+}: DateWheelPickerProps) {
+  const maximum = useMemo(() => {
+    const now = new Date();
+    return (
+      parseSolarDate(maxDate) ?? {
+        year: now.getFullYear(),
+        month: now.getMonth() + 1,
+        day: now.getDate(),
+      }
+    );
+  }, [maxDate]);
+  const maximumLunar = useMemo(() => solarToLunar(maximum), [maximum]);
+  const initial = useMemo(() => {
+    const draft = {
+      year: value.year,
+      month: calendarType === "lunar" && value.isLeapMonth ? -value.month : value.month,
+      day: value.day,
+    };
+    return calendarType === "lunar"
+      ? clampLunarDate(draft, MIN_LUNAR_DATE, maximumLunar)
+      : clampSolarDate(draft, maximum);
+  }, [calendarType, maximum, maximumLunar, value]);
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(initial);
   const rootRef = useRef<HTMLDivElement>(null);
   const dialogId = useId();
 
-  const yearOptions = useMemo(
-    () => range(MIN_YEAR, maximum.year).map((year) => ({ value: year, label: `${year}` })),
-    [maximum.year],
+  const yearOptions = useMemo(() => {
+    const firstYear = calendarType === "lunar" ? MIN_LUNAR_DATE.year : MIN_SOLAR_DATE.year;
+    const lastYear = calendarType === "lunar" ? maximumLunar.year : maximum.year;
+    return range(firstYear, lastYear).map((year) => ({ value: year, label: `${year}` }));
+  }, [calendarType, maximum.year, maximumLunar.year]);
+  const lunarMonths = useMemo(
+    () =>
+      calendarType === "lunar"
+        ? lunarMonthsInRange(draft.year, MIN_LUNAR_DATE, maximumLunar)
+        : [],
+    [calendarType, draft.year, maximumLunar],
   );
   const monthOptions = useMemo(() => {
+    if (calendarType === "lunar") {
+      return lunarMonths.map((month) => ({
+        value: month.signedMonth,
+        label: month.label,
+      }));
+    }
     const lastMonth = draft.year === maximum.year ? maximum.month : 12;
     return range(1, lastMonth).map((month) => ({ value: month, label: `${month}` }));
-  }, [draft.year, maximum.month, maximum.year]);
+  }, [calendarType, draft.year, lunarMonths, maximum.month, maximum.year]);
   const dayOptions = useMemo(() => {
+    if (calendarType === "lunar") {
+      const month = lunarMonths.find((item) => item.signedMonth === draft.month);
+      if (!month) return [];
+      return lunarDaysInRange(draft.year, month, MIN_LUNAR_DATE, maximumLunar).map((day) => ({
+        value: day,
+        label: lunarDayLabel(day),
+      }));
+    }
     const naturalLastDay = daysInMonth(draft.year, draft.month);
     const lastDay =
       draft.year === maximum.year && draft.month === maximum.month
         ? Math.min(naturalLastDay, maximum.day)
         : naturalLastDay;
     return range(1, lastDay).map((day) => ({ value: day, label: `${day}` }));
-  }, [draft.month, draft.year, maximum.day, maximum.month, maximum.year]);
+  }, [calendarType, draft.month, draft.year, lunarMonths, maximum, maximumLunar]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -238,14 +345,29 @@ export function DateWheelPicker({ value, maxDate, onChange, labelledBy }: DateWh
     setIsOpen(true);
   }
 
-  function updateDraft(next: Partial<DateParts>) {
-    setDraft((current) => clampDate({ ...current, ...next }, maximum));
+  function updateDraft(next: Partial<WheelDateDraft>) {
+    setDraft((current) => {
+      const candidate = { ...current, ...next };
+      return calendarType === "lunar"
+        ? clampLunarDate(candidate, MIN_LUNAR_DATE, maximumLunar)
+        : clampSolarDate(candidate, maximum);
+    });
   }
 
   function confirmDate() {
-    onChange(formatDate(draft));
+    onChange({
+      year: draft.year,
+      month: Math.abs(draft.month),
+      day: draft.day,
+      isLeapMonth: calendarType === "lunar" && draft.month < 0,
+    });
     setIsOpen(false);
   }
+
+  const displayValue =
+    calendarType === "lunar"
+      ? formatLunarDate(value)
+      : formatSolarDate(value);
 
   return (
     <div className="date-wheel-picker" ref={rootRef}>
@@ -258,7 +380,7 @@ export function DateWheelPicker({ value, maxDate, onChange, labelledBy }: DateWh
         aria-controls={isOpen ? dialogId : undefined}
         onClick={() => (isOpen ? setIsOpen(false) : openPicker())}
       >
-        <span>{value}</span>
+        <span>{displayValue}</span>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
 

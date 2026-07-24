@@ -3,7 +3,6 @@
 import {
   AlertCircle,
   CalendarDays,
-  Check,
   ChevronRight,
   Clock3,
   Info,
@@ -13,9 +12,16 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { previewChart } from "@/lib/api";
 import { DateWheelPicker, TimeWheelPicker } from "@/components/date-wheel-picker";
+import {
+  formatSolarDate,
+  lunarToSolar,
+  solarToLunar,
+  type CalendarType,
+  type LunarDateParts,
+} from "@/lib/lunar-calendar";
 import {
   CHINA_PROVINCES,
   formatChinaBirthplace,
@@ -57,24 +63,6 @@ const POLICY_LABELS: Record<string, string> = {
   beijing_standard_time: "北京时间",
 };
 
-const LOCATION_PRECISION_LABELS: Record<string, string> = {
-  district_centroid: "区县中心点",
-  district_center: "区县中心点",
-  administrative_center: "行政中心点",
-  city_center: "城市行政中心",
-  district_service_point: "区级官方服务点",
-  geographic_area_representative_point: "地理区域代表点",
-  township_area_centroid: "乡镇市区边界质心",
-};
-
-const COORDINATE_MATCH_LABELS: Record<string, string> = {
-  direct_code: "正式区划代码",
-  official_mca_api: "民政部国家地名信息库",
-  official_had_service_point: "香港民政事务总署",
-  geonames_adm1_direct_id: "GeoNames 澳门地理区域",
-  official_boundary_derived_centroid: "台湾官方区界派生数据",
-};
-
 function readable(value: unknown, fallback = "暂未提供"): string {
   if (typeof value === "string" && value.trim()) return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -95,31 +83,6 @@ function formatDateTime(value: unknown): string {
     .replace("T", " ")
     .replace(/([+-]\d{2}:\d{2}|Z)$/, "")
     .replace(/:00$/, "");
-}
-
-function formatLongitude(value: unknown): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "暂未提供";
-  const direction = value >= 0 ? "E" : "W";
-  const degrees = Math.abs(value).toFixed(4).replace(/\.?0+$/, "");
-  return `${degrees}°${direction}`;
-}
-
-function formatMinutes(value: unknown): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "暂未提供";
-  const minutes = value.toFixed(2);
-  return `${value > 0 ? "+" : ""}${minutes} 分钟`;
-}
-
-function formatLocationPrecision(value: unknown): string {
-  const precision = readable(value, "");
-  if (!precision) return "暂未提供";
-  return LOCATION_PRECISION_LABELS[precision] ?? precision;
-}
-
-function formatCoordinateMatch(value: unknown): string {
-  const match = readable(value, "");
-  if (!match) return "暂未提供";
-  return COORDINATE_MATCH_LABELS[match] ?? match;
 }
 
 function getPillar(chart: ChartPreview, key: PillarKey, index: number): Partial<PillarDetail> {
@@ -156,16 +119,49 @@ function formatDistributionValue(value: unknown): string {
   return readable(value, "0");
 }
 
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+
 function todayString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = `${now.getMonth() + 1}`.padStart(2, "0");
-  const day = `${now.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const beijingNow = new Date(Date.now() + BEIJING_OFFSET_MS);
+  return beijingNow.toISOString().slice(0, 10);
+}
+
+function millisecondsUntilNextBeijingDay(): number {
+  const beijingNow = new Date(Date.now() + BEIJING_OFFSET_MS);
+  const nextMidnight = Date.UTC(
+    beijingNow.getUTCFullYear(),
+    beijingNow.getUTCMonth(),
+    beijingNow.getUTCDate() + 1,
+  );
+  return Math.max(1_000, nextMidnight - beijingNow.getTime() + 1_000);
+}
+
+function useBeijingToday(): string {
+  const [today, setToday] = useState(todayString);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleRefresh = () => {
+      timer = setTimeout(() => {
+        setToday(todayString());
+        scheduleRefresh();
+      }, millisecondsUntilNextBeijingDay());
+    };
+    scheduleRefresh();
+    return () => clearTimeout(timer);
+  }, []);
+
+  return today;
 }
 
 export function BaziWorkbench() {
-  const [birthDate, setBirthDate] = useState("1990-01-01");
+  const [calendarType, setCalendarType] = useState<CalendarType>("solar");
+  const [birthDate, setBirthDate] = useState<LunarDateParts>({
+    year: 1990,
+    month: 1,
+    day: 1,
+    isLeapMonth: false,
+  });
   const [birthTime, setBirthTime] = useState("12:00");
   const [provinceCode, setProvinceCode] = useState("");
   const [secondLevelCode, setSecondLevelCode] = useState("");
@@ -177,7 +173,7 @@ export function BaziWorkbench() {
   const [formError, setFormError] = useState("");
   const [lastRequest, setLastRequest] = useState<ChartPreviewRequest | null>(null);
 
-  const maxDate = useMemo(() => todayString(), []);
+  const maxDate = useBeijingToday();
   const secondLevelOptions = useMemo(
     () => getChinaSecondLevelAreas(provinceCode),
     [provinceCode],
@@ -203,12 +199,22 @@ export function BaziWorkbench() {
     setDistrictCode(nextDistricts.length === 1 ? nextDistricts[0].code : "");
   }
 
+  function handleCalendarTypeChange(nextType: CalendarType) {
+    if (nextType === calendarType) return;
+    setBirthDate((current) =>
+      nextType === "lunar"
+        ? solarToLunar(current)
+        : { ...lunarToSolar(current), isLeapMonth: false },
+    );
+    setCalendarType(nextType);
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError("");
     setError("");
 
-    if (!birthDate || !birthTime) {
+    if (!birthTime) {
       setFormError("请选择完整的出生日期和时间。");
       return;
     }
@@ -227,8 +233,20 @@ export function BaziWorkbench() {
       birthplace = resolvedBirthplace;
     }
 
+    const solarBirthDate =
+      calendarType === "lunar" ? lunarToSolar(birthDate) : birthDate;
     const request: ChartPreviewRequest = {
-      beijing_datetime: `${birthDate}T${birthTime}:00`,
+      beijing_datetime: `${formatSolarDate(solarBirthDate)}T${birthTime}:00`,
+      calendar_type: calendarType,
+      lunar_date:
+        calendarType === "lunar"
+          ? {
+              year: birthDate.year,
+              month: birthDate.month,
+              day: birthDate.day,
+              is_leap_month: birthDate.isLeapMonth,
+            }
+          : null,
       birthplace,
       gender,
       calculation_policy: {
@@ -282,8 +300,33 @@ export function BaziWorkbench() {
           <form onSubmit={handleSubmit} noValidate>
             <div className="field-grid">
               <div className="field field-wide">
-                <span className="field-label" id="birth-date-label"><CalendarDays size={15} aria-hidden="true" /> 出生日期</span>
+                <div className="field-label-row">
+                  <span className="field-label" id="birth-date-label"><CalendarDays size={15} aria-hidden="true" /> 出生日期</span>
+                  <div
+                    className="segmented-control calendar-type-control"
+                    role="radiogroup"
+                    aria-label="出生日期历法"
+                  >
+                    {(["solar", "lunar"] as const).map((value) => (
+                      <label
+                        className={`segment ${calendarType === value ? "is-selected" : ""}`}
+                        key={value}
+                      >
+                        <input
+                          type="radio"
+                          name="calendar-type"
+                          value={value}
+                          checked={calendarType === value}
+                          onChange={() => handleCalendarTypeChange(value)}
+                        />
+                        <span>{value === "solar" ? "公历" : "农历"}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <DateWheelPicker
+                  key={calendarType}
+                  calendarType={calendarType}
                   value={birthDate}
                   maxDate={maxDate}
                   onChange={setBirthDate}
@@ -349,7 +392,6 @@ export function BaziWorkbench() {
                         onChange={() => setGender(value)}
                       />
                       <span>{value === "male" ? "男" : "女"}</span>
-                      {gender === value && <Check size={14} aria-hidden="true" />}
                     </label>
                   ))}
                 </div>
@@ -446,8 +488,7 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
   const birthplace = normalized.birthplace
     ? formatChinaBirthplace(normalized.birthplace)
     : "未选择（按北京时间）";
-  const solarTime = chart.solar_time_adjustment;
-  const usesTrueSolarTime = solarTime !== null && policy.true_solar_time !== false;
+  const usesTrueSolarTime = policy.true_solar_time !== false;
 
   return (
     <div className="chart-content">
@@ -482,33 +523,6 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
           })}
         </div>
       </section>
-
-      {solarTime ? (
-        <section className="solar-time-section" aria-labelledby="solar-time-title">
-          <div className="section-heading">
-            <h3 id="solar-time-title">真太阳时校正</h3>
-            <span>{formatDateTime(normalized.beijing_datetime)} → {formatDateTime(normalized.true_solar_datetime)}</span>
-          </div>
-          <dl className="solar-time-grid">
-            <div><dt>出生地经度</dt><dd>{formatLongitude(solarTime.longitude_degrees)}</dd></div>
-            <div><dt>标准经线</dt><dd>{formatLongitude(solarTime.reference_meridian_degrees)}</dd></div>
-            <div><dt>经度修正</dt><dd>{formatMinutes(solarTime.longitude_correction_minutes)}</dd></div>
-            <div><dt>均时差</dt><dd>{formatMinutes(solarTime.equation_of_time_minutes)}</dd></div>
-            <div><dt>总修正</dt><dd>{formatMinutes(solarTime.total_correction_minutes)}</dd></div>
-            <div><dt>地点精度</dt><dd>{formatLocationPrecision(solarTime.location_precision)}</dd></div>
-            <div><dt>坐标匹配</dt><dd>{formatCoordinateMatch(solarTime.coordinate_match)}</dd></div>
-            <div><dt>坐标数据</dt><dd>{readable(solarTime.coordinate_source)}</dd></div>
-          </dl>
-        </section>
-      ) : (
-        <section className="solar-time-section" aria-labelledby="solar-time-title">
-          <div className="section-heading">
-            <h3 id="solar-time-title">北京时间排盘</h3>
-            <span>未进行真太阳时校正</span>
-          </div>
-          <p className="muted-copy">未选择出生地点，本次直接使用输入的北京时间。</p>
-        </section>
-      )}
 
       <div className="detail-grid">
         <section className="detail-section" aria-labelledby="elements-title">

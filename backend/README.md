@@ -40,6 +40,33 @@ uv run pytest
 }
 ```
 
+`calendar_type` 默认为 `"solar"`，因此上面的公历请求可以省略它；公历请求禁止同时
+提供 `lunar_date`。完整农历请求示例：
+
+```json
+{
+  "beijing_datetime": "2023-03-22T12:00:00",
+  "calendar_type": "lunar",
+  "lunar_date": {
+    "year": 2023,
+    "month": 2,
+    "day": 1,
+    "is_leap_month": true
+  },
+  "gender": "female",
+  "birthplace": {
+    "location_id": "CN:440106"
+  }
+}
+```
+
+农历模式必须同时提交 `lunar_date` 和 `beijing_datetime`。其中 `lunar_date` 是用户选择
+的农历年月日，`is_leap_month=true` 表示闰月；`beijing_datetime` 的年月日必须填写该
+农历日期换算后的公历日期，时分秒仍是用户输入的北京时间。后端会使用
+`lunar-python` 独立换算并校验两者完全一致，不存在的日期、不存在的闰月或日期不一致
+都会返回 `422`。响应的 `normalized_input` 会原样回传 `calendar_type` 和经过校验的
+`lunar_date`；公历模式下 `lunar_date` 为 `null`。
+
 `birthplace` 和 `calculation_policy` 均可省略。响应的核心结构为：
 
 ```text
@@ -64,7 +91,7 @@ IANA `timezone` 和真实可变层级 `division_path`。地点时区仅作为元
 
 不提供 `birthplace`（省略或传 `null`）时，`true_solar_time` 默认为且必须为 `false`。
 系统按输入的北京时间直接排盘，`normalized_input.birthplace` 和
-`solar_time_adjustment` 均为 `null`，并在 `warnings` 中说明未进行真太阳时校正。
+`solar_time_adjustment` 均为 `null`。
 
 提供出生地点时，真太阳时按以下口径计算：
 

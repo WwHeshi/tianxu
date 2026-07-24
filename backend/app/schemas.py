@@ -44,12 +44,25 @@ class CanonicalBirthplace(BaseModel):
     division_path: list[DivisionPathItem]
 
 
+class LunarDateInput(BaseModel):
+    """A Chinese lunar calendar date; the clock remains in beijing_datetime."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    year: int = Field(ge=1, le=9999)
+    month: int = Field(ge=1, le=12)
+    day: int = Field(ge=1, le=30)
+    is_leap_month: bool = False
+
+
 class BirthInput(BaseModel):
     """Birth information entered using the Beijing standard-time clock."""
 
     model_config = ConfigDict(extra="forbid")
 
     beijing_datetime: datetime
+    calendar_type: Literal["solar", "lunar"] = "solar"
+    lunar_date: LunarDateInput | None = None
     birthplace: Birthplace | None = None
     gender: Gender
     calculation_policy: CalculationPolicy = Field(default_factory=CalculationPolicy)
@@ -76,6 +89,14 @@ class BirthInput(BaseModel):
             raise ValueError("已选择出生地点时，true_solar_time 必须为 true")
         return self
 
+    @model_validator(mode="after")
+    def require_consistent_calendar_input(self) -> "BirthInput":
+        if self.calendar_type == "solar" and self.lunar_date is not None:
+            raise ValueError("公历输入时禁止提供 lunar_date")
+        if self.calendar_type == "lunar" and self.lunar_date is None:
+            raise ValueError("农历输入时必须提供 lunar_date")
+        return self
+
     @field_validator("beijing_datetime")
     @classmethod
     def require_naive_beijing_datetime(cls, value: datetime) -> datetime:
@@ -87,6 +108,8 @@ class BirthInput(BaseModel):
 class NormalizedBirthInput(BaseModel):
     beijing_datetime: datetime
     true_solar_datetime: datetime
+    calendar_type: Literal["solar", "lunar"]
+    lunar_date: LunarDateInput | None
     birthplace: CanonicalBirthplace | None
     gender: Gender
 

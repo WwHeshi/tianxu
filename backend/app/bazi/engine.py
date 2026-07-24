@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
 from math import cos, pi, sin
 
-from lunar_python import Solar
+from lunar_python import Lunar, Solar
 from lunar_python.util import LunarUtil
 
 from ..schemas import (
@@ -105,20 +105,53 @@ def _minutes_from_pillar_boundary(value: datetime) -> float:
     return min(abs(minute_of_day - boundary) for boundary in boundaries)
 
 
+def _validate_calendar_input(birth: BirthInput) -> None:
+    if birth.calendar_type == "solar":
+        return
+
+    lunar_date = birth.lunar_date
+    if lunar_date is None:  # pragma: no cover - protected by BirthInput validation
+        raise ChartCalculationError("农历输入缺少 lunar_date")
+    lunar_month = -lunar_date.month if lunar_date.is_leap_month else lunar_date.month
+    try:
+        lunar = Lunar.fromYmd(lunar_date.year, lunar_month, lunar_date.day)
+        converted_solar = lunar.getSolar()
+        converted_date = datetime(
+            converted_solar.getYear(),
+            converted_solar.getMonth(),
+            converted_solar.getDay(),
+        ).date()
+    except Exception as exc:  # lunar-python does not expose stable exception types
+        description = (
+            f"{lunar_date.year}年"
+            f"{'闰' if lunar_date.is_leap_month else ''}{lunar_date.month}月"
+            f"{lunar_date.day}日"
+        )
+        raise ChartCalculationError(
+            f"无效的农历日期或该年不存在所选闰月：{description}"
+        ) from exc
+
+    beijing_date = birth.beijing_datetime.date()
+    if converted_date != beijing_date:
+        raise ChartCalculationError(
+            f"农历日期换算为公历 {converted_date.isoformat()}，"
+            f"与 beijing_datetime 日期 {beijing_date.isoformat()} 不一致"
+        )
+
+
 def _normalize_birth(
     birth: BirthInput,
 ) -> tuple[NormalizedBirthInput, SolarTimeAdjustment | None, list[str]]:
     if birth.birthplace is None:
-        warnings = [
-            "未选择出生地点，已关闭真太阳时校正并按北京时间直接排盘；"
-            "结果可能与按出生地真太阳时排盘不同"
-        ]
+        warnings: list[str] = []
         if _minutes_from_pillar_boundary(birth.beijing_datetime) <= 10:
             warnings.append("北京时间接近换日或时辰边界，请复核出生时间")
         return (
             NormalizedBirthInput(
                 beijing_datetime=birth.beijing_datetime,
                 true_solar_datetime=birth.beijing_datetime,
+                calendar_type=birth.calendar_type,
+                lunar_date=birth.lunar_date,
                 birthplace=None,
                 gender=birth.gender,
             ),
@@ -150,6 +183,8 @@ def _normalize_birth(
     normalized = NormalizedBirthInput(
         beijing_datetime=birth.beijing_datetime,
         true_solar_datetime=true_solar_datetime,
+        calendar_type=birth.calendar_type,
+        lunar_date=birth.lunar_date,
         birthplace=CanonicalBirthplace(
             location_id=location.location_id,
             region_code=location.region_code,
@@ -233,6 +268,7 @@ def _pillar(name: str, gan_zhi: str, day_master: str) -> Pillar:
 def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
     """Calculate a chart with a deterministic, versioned policy."""
 
+    _validate_calendar_input(birth)
     normalized, solar_time_adjustment, warnings = _normalize_birth(birth)
     true_solar = normalized.true_solar_datetime
     try:

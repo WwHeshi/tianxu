@@ -11,9 +11,18 @@ export interface CalculationPolicyInput {
 
 export interface ChartPreviewRequest {
   beijing_datetime: string;
+  calendar_type: "solar" | "lunar";
+  lunar_date: LunarDateInput | null;
   birthplace: BirthplaceInput | null;
   gender: Gender;
   calculation_policy?: CalculationPolicyInput;
+}
+
+export interface LunarDateInput {
+  year: number;
+  month: number;
+  day: number;
+  is_leap_month: boolean;
 }
 
 export interface BirthplaceInput {
@@ -73,6 +82,8 @@ export interface CalculationPolicy {
 export interface NormalizedBirthInfo {
   beijing_datetime: string;
   true_solar_datetime: string;
+  calendar_type: "solar" | "lunar";
+  lunar_date: LunarDateInput | null;
   birthplace: NormalizedBirthplace | null;
   gender: Gender | "other";
 }

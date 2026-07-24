@@ -3,6 +3,7 @@ from math import cos, pi, sin
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 
 from app.bazi import locations
 from app.bazi.engine import ChartCalculationError, calculate_chart
@@ -76,7 +77,7 @@ def test_missing_birthplace_uses_beijing_clock_without_solar_adjustment() -> Non
     assert result.normalized_input.true_solar_datetime == beijing
     assert result.normalized_input.birthplace is None
     assert result.solar_time_adjustment is None
-    assert any("按北京时间直接排盘" in warning for warning in result.warnings)
+    assert result.warnings == []
     assert "未选择出生地点" in result.engine.solar_time_note
 
 
@@ -198,6 +199,106 @@ def test_leap_day_is_supported() -> None:
     assert result.normalized_input.beijing_datetime.isoformat() == "2024-02-29T08:15:00"
     assert result.normalized_input.true_solar_datetime.date().isoformat() == "2024-02-29"
     assert len(result.chart.pillars.day.gan_zhi) == 2
+
+
+@pytest.mark.parametrize(
+    ("beijing_datetime", "lunar_date"),
+    [
+        (
+            "2024-02-10T12:00:00",
+            {"year": 2024, "month": 1, "day": 1, "is_leap_month": False},
+        ),
+        (
+            "2023-03-22T12:00:00",
+            {"year": 2023, "month": 2, "day": 1, "is_leap_month": True},
+        ),
+    ],
+)
+def test_lunar_dates_are_validated_and_echoed(
+    beijing_datetime: str,
+    lunar_date: dict[str, object],
+) -> None:
+    birth = BirthInput(
+        beijing_datetime=beijing_datetime,
+        calendar_type="lunar",
+        lunar_date=lunar_date,
+        birthplace={"location_id": GUANGZHOU_TIANHE},
+        gender="female",
+    )
+
+    result = calculate_chart(birth)
+
+    assert result.normalized_input.calendar_type == "lunar"
+    assert result.normalized_input.lunar_date == birth.lunar_date
+
+
+def test_nonexistent_lunar_leap_month_is_rejected_by_engine() -> None:
+    birth = BirthInput(
+        beijing_datetime="2024-03-10T12:00:00",
+        calendar_type="lunar",
+        lunar_date={"year": 2024, "month": 2, "day": 1, "is_leap_month": True},
+        birthplace={"location_id": GUANGZHOU_TIANHE},
+        gender="female",
+    )
+
+    with pytest.raises(ChartCalculationError, match="不存在所选闰月"):
+        calculate_chart(birth)
+
+
+def test_nonexistent_lunar_day_is_rejected_by_engine() -> None:
+    birth = BirthInput(
+        beijing_datetime="2024-03-10T12:00:00",
+        calendar_type="lunar",
+        lunar_date={"year": 2024, "month": 1, "day": 30},
+        birthplace={"location_id": GUANGZHOU_TIANHE},
+        gender="female",
+    )
+
+    with pytest.raises(ChartCalculationError, match="无效的农历日期"):
+        calculate_chart(birth)
+
+
+def test_lunar_date_must_match_beijing_datetime_date() -> None:
+    birth = BirthInput(
+        beijing_datetime="2024-02-11T12:00:00",
+        calendar_type="lunar",
+        lunar_date={"year": 2024, "month": 1, "day": 1},
+        birthplace={"location_id": GUANGZHOU_TIANHE},
+        gender="female",
+    )
+
+    with pytest.raises(ChartCalculationError, match=r"2024-02-10.*2024-02-11"):
+        calculate_chart(birth)
+
+
+@pytest.mark.parametrize(
+    "calendar_fields",
+    [
+        {
+            "calendar_type": "solar",
+            "lunar_date": {"year": 2024, "month": 1, "day": 1},
+        },
+        {"calendar_type": "lunar"},
+        {
+            "calendar_type": "lunar",
+            "lunar_date": {"year": 2024, "month": 13, "day": 1},
+        },
+        {
+            "calendar_type": "lunar",
+            "lunar_date": {"year": 2024, "month": 1, "day": 31},
+        },
+    ],
+)
+def test_calendar_schema_rejects_inconsistent_or_out_of_range_input(
+    calendar_fields: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        BirthInput(
+            beijing_datetime="2024-02-10T12:00:00",
+            birthplace={"location_id": GUANGZHOU_TIANHE},
+            gender="female",
+            **calendar_fields,
+        )
 
 
 def test_legacy_statistical_development_zone_is_rejected() -> None:

@@ -67,6 +67,7 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .panel-intro { margin: 17px 0 27px; color: var(--muted); font-size: 13px; }
 .field-grid { display: grid; gap: 20px; }
 .field { display: grid; gap: 8px; min-width: 0; }
+.field-label-row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .field-label { gap: 7px; color: var(--ink); font-size: 13px; font-weight: 650; }
 .field-label svg { color: var(--accent); }
 .field input, .field select, .date-picker-trigger { width: 100%; min-width: 0; max-width: 100%; height: 44px; padding: 0 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px; outline: none; transition: border-color 140ms ease, box-shadow 140ms ease; }
@@ -105,6 +106,8 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .segment input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .segment.is-selected { color: var(--accent-dark); background: var(--accent-soft); font-weight: 650; }
 .segment:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: -2px; }
+.calendar-type-control { flex: 0 0 136px; width: 136px; min-height: 29px; }
+.calendar-type-control .segment { gap: 4px; cursor: pointer; font-size: 12px; }
 .form-message { gap: 7px; margin: 18px 0 0; color: var(--danger); font-size: 12px; }
 .primary-button, .secondary-button { justify-content: center; gap: 8px; border-radius: 5px; font-weight: 650; transition: background 140ms ease, border-color 140ms ease, transform 140ms ease; }
 .primary-button { width: 100%; height: 46px; margin-top: 25px; color: #fff; background: var(--accent); border: 1px solid var(--accent); }
@@ -149,11 +152,6 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .pillar-detail { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; align-items: baseline; margin-top: 7px; font-size: 11px; }
 .pillar-detail span { color: var(--quiet); }
 .pillar-detail strong { min-width: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 12px; font-weight: 550; }
-.solar-time-section { margin-top: 42px; padding-top: 28px; border-top: 1px solid var(--line); }
-.solar-time-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line); }
-.solar-time-grid > div { min-width: 0; display: grid; gap: 3px; padding: 12px 14px 12px 0; border-bottom: 1px solid var(--line); }
-.solar-time-grid dt { color: var(--quiet); font-size: 11px; }
-.solar-time-grid dd { min-width: 0; margin: 0; color: var(--ink); overflow-wrap: anywhere; font-size: 13px; font-weight: 650; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 46px; margin-top: 42px; padding-top: 28px; border-top: 1px solid var(--line); }
 .elements-list { display: grid; gap: 12px; }
 .element-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 25px; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; }
@@ -200,8 +198,6 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
   .meta-strip { grid-template-columns: 1fr; }
   .meta-strip > div { padding: 10px 13px; border-right: 0; border-bottom: 1px solid var(--line); }
   .meta-strip > div:last-child { border-bottom: 0; }
-  .solar-time-section { margin-top: 32px; padding-top: 23px; }
-  .solar-time-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pillars-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .pillar { min-height: 238px; padding: 14px 12px; }
   .pillar-glyphs { margin: 18px 0 16px; font-size: 36px; }

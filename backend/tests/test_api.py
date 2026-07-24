@@ -92,6 +92,8 @@ async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient
         "hour": "甲午",
     }
     assert data["normalized_input"]["beijing_datetime"] == "1990-01-01T12:00:00"
+    assert data["normalized_input"]["calendar_type"] == "solar"
+    assert data["normalized_input"]["lunar_date"] is None
     assert data["normalized_input"]["birthplace"] == canonical_birthplace(
         "CN:440106",
         ("440000", "广东省", "province"),
@@ -117,6 +119,163 @@ async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient
         data["normalized_input"]["true_solar_datetime"]
     ) < datetime.fromisoformat(data["normalized_input"]["beijing_datetime"])
     assert data["engine"]["solar_time_note"]
+
+
+@pytest.mark.asyncio
+async def test_lunar_calendar_input_returns_normalized_contract(client: AsyncClient) -> None:
+    payload = valid_payload() | {
+        "beijing_datetime": "2024-02-10T12:00:00",
+        "calendar_type": "lunar",
+        "lunar_date": {
+            "year": 2024,
+            "month": 1,
+            "day": 1,
+            "is_leap_month": False,
+        },
+    }
+
+    response = await client.post("/api/v1/charts/preview", json=payload)
+
+    assert response.status_code == 200
+    normalized = response.json()["normalized_input"]
+    assert normalized["beijing_datetime"] == "2024-02-10T12:00:00"
+    assert normalized["calendar_type"] == "lunar"
+    assert normalized["lunar_date"] == {
+        "year": 2024,
+        "month": 1,
+        "day": 1,
+        "is_leap_month": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_leap_lunar_month_is_supported(client: AsyncClient) -> None:
+    payload = valid_payload() | {
+        "beijing_datetime": "2023-03-22T12:00:00",
+        "calendar_type": "lunar",
+        "lunar_date": {
+            "year": 2023,
+            "month": 2,
+            "day": 1,
+            "is_leap_month": True,
+        },
+    }
+
+    response = await client.post("/api/v1/charts/preview", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["normalized_input"]["lunar_date"]["is_leap_month"] is True
+
+
+@pytest.mark.asyncio
+async def test_nonexistent_lunar_leap_month_is_rejected(client: AsyncClient) -> None:
+    payload = valid_payload() | {
+        "beijing_datetime": "2024-03-10T12:00:00",
+        "calendar_type": "lunar",
+        "lunar_date": {
+            "year": 2024,
+            "month": 2,
+            "day": 1,
+            "is_leap_month": True,
+        },
+    }
+
+    response = await client.post("/api/v1/charts/preview", json=payload)
+
+    assert response.status_code == 422
+    assert "不存在所选闰月" in response.text
+
+
+@pytest.mark.asyncio
+async def test_nonexistent_lunar_day_is_rejected(client: AsyncClient) -> None:
+    payload = valid_payload() | {
+        "beijing_datetime": "2024-03-10T12:00:00",
+        "calendar_type": "lunar",
+        "lunar_date": {
+            "year": 2024,
+            "month": 1,
+            "day": 30,
+            "is_leap_month": False,
+        },
+    }
+
+    response = await client.post("/api/v1/charts/preview", json=payload)
+
+    assert response.status_code == 422
+    assert "无效的农历日期" in response.text
+
+
+@pytest.mark.asyncio
+async def test_lunar_and_converted_solar_dates_must_match(client: AsyncClient) -> None:
+    payload = valid_payload() | {
+        "beijing_datetime": "2024-02-11T12:00:00",
+        "calendar_type": "lunar",
+        "lunar_date": {
+            "year": 2024,
+            "month": 1,
+            "day": 1,
+            "is_leap_month": False,
+        },
+    }
+
+    response = await client.post("/api/v1/charts/preview", json=payload)
+
+    assert response.status_code == 422
+    assert "2024-02-10" in response.text
+    assert "2024-02-11" in response.text
+
+
+@pytest.mark.asyncio
+async def test_solar_calendar_input_cannot_include_lunar_date(client: AsyncClient) -> None:
+    payload = valid_payload() | {
+        "calendar_type": "solar",
+        "lunar_date": {
+            "year": 1989,
+            "month": 12,
+            "day": 5,
+            "is_leap_month": False,
+        },
+    }
+
+    response = await client.post("/api/v1/charts/preview", json=payload)
+
+    assert response.status_code == 422
+    assert "公历输入时禁止提供 lunar_date" in response.text
+
+
+@pytest.mark.asyncio
+async def test_lunar_calendar_input_requires_lunar_date(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/charts/preview",
+        json=valid_payload() | {"calendar_type": "lunar"},
+    )
+
+    assert response.status_code == 422
+    assert "农历输入时必须提供 lunar_date" in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lunar_date",
+    [
+        {"year": 2024, "month": 13, "day": 1, "is_leap_month": False},
+        {"year": 2024, "month": 1, "day": 31, "is_leap_month": False},
+    ],
+)
+async def test_lunar_date_structure_is_bounded(
+    client: AsyncClient,
+    lunar_date: dict[str, object],
+) -> None:
+    response = await client.post(
+        "/api/v1/charts/preview",
+        json=valid_payload()
+        | {
+            "calendar_type": "lunar",
+            "lunar_date": lunar_date,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -148,7 +307,7 @@ async def test_preview_without_birthplace_uses_beijing_time_directly(
     assert data["normalized_input"]["beijing_datetime"] == "1990-01-01T12:00:00"
     assert data["normalized_input"]["true_solar_datetime"] == "1990-01-01T12:00:00"
     assert data["solar_time_adjustment"] is None
-    assert any("按北京时间直接排盘" in warning for warning in data["warnings"])
+    assert data["warnings"] == []
     assert "未选择出生地点" in data["engine"]["solar_time_note"]
 
 
