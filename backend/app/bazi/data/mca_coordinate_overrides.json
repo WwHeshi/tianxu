@@ -1,6 +1,6 @@
 {
   "schema_version": "tianxu.mca-coordinate-overrides.v1",
-  "queried_at": "2026-07-24T12:47:17.063Z",
+  "queried_at": "2026-07-24T17:40:35.273Z",
   "source": {
     "name": "中华人民共和国民政部国家地名信息库",
     "website": "https://dmfw.mca.gov.cn/",
@@ -15,6 +15,22 @@
     "year": 0
   },
   "records": {
+    "150204": {
+      "district_code": "150204",
+      "district_name": "青山区",
+      "source_record_id": "81706d9e47c8e58581713c6c2ee3c2f3",
+      "place_code": "15020499921400000000",
+      "standard_name": "青山区",
+      "place_type": "县级行政区",
+      "place_type_code": "21400",
+      "province_name": "内蒙古自治区",
+      "city_name": "包头市",
+      "area_name": "青山区",
+      "area_code": "150204999",
+      "longitude": 109.897026602433,
+      "latitude": 40.642914138635,
+      "detail_response_sha256": "bf15ceba72e48edabf7c99e2525e382f692e02cc65808186bd1e74b0a6dfaf09"
+    },
     "460302": {
       "district_code": "460302",
       "district_name": "西沙区",
@@ -94,6 +110,22 @@
       "longitude": 91.9561404,
       "latitude": 27.9944741,
       "detail_response_sha256": "a3cd035c23e805d5f8ec72eb8b69dfa3f10f1243eb9feac5797a746219669927"
+    },
+    "653221": {
+      "district_code": "653221",
+      "district_name": "和田县",
+      "source_record_id": "6595c1132cdc1f47bea041ee10dd15f5",
+      "place_code": "65322199921400000001",
+      "standard_name": "和田县",
+      "place_type": "县级行政区",
+      "place_type_code": "21400",
+      "province_name": "新疆维吾尔自治区",
+      "city_name": "和田地区",
+      "area_name": "和田县",
+      "area_code": "653221999",
+      "longitude": 79.9340833,
+      "latitude": 37.1072882,
+      "detail_response_sha256": "d2e1d414eb18c4c18defbdd42e029b2bdd6aea9c3ef5caa3c7867338d7be473f"
     },
     "653228": {
       "district_code": "653228",

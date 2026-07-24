@@ -26,8 +26,8 @@ def test_coordinate_snapshot_is_internally_consistent() -> None:
     assert len(records) == coverage["total"] == 2849
     assert coverage == {
         "total": 2849,
-        "direct_code": 2841,
-        "official_mca_api": 8,
+        "direct_code": 2839,
+        "official_mca_api": 10,
         "fallback": 0,
     }
     assert sum(value for key, value in coverage.items() if key != "total") == len(records)
@@ -70,11 +70,13 @@ def test_official_mca_coordinates_cover_all_non_direct_records() -> None:
     }
 
     assert set(official_records) == {
+        "150204",
         "460302",
         "460303",
         "500157",
         "540481",
         "540581",
+        "653221",
         "653228",
         "653229",
         "659012",
@@ -82,6 +84,23 @@ def test_official_mca_coordinates_cover_all_non_direct_records() -> None:
     for record in official_records.values():
         assert record["fallback"] is False
         assert record["coordinate_source"].strip()
+
+
+def test_corrected_mainland_coordinates_are_stable() -> None:
+    records = json.loads(DATA_PATH.read_text(encoding="utf-8"))["records"]
+    baotou_qingshan = records["150204"]
+    hotan_county = records["653221"]
+
+    assert baotou_qingshan["longitude"] == pytest.approx(109.897026602433)
+    assert baotou_qingshan["latitude"] == pytest.approx(40.642914138635)
+    assert baotou_qingshan["coordinate_match"] == "official_mca_api"
+    assert (baotou_qingshan["longitude"], baotou_qingshan["latitude"]) != (
+        records["420107"]["longitude"],
+        records["420107"]["latitude"],
+    )
+    assert hotan_county["longitude"] == pytest.approx(79.9340833)
+    assert hotan_county["latitude"] == pytest.approx(37.1072882)
+    assert hotan_county["coordinate_match"] == "official_mca_api"
 
 
 def test_known_district_coordinate_is_stable() -> None:

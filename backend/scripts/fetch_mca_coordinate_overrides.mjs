@@ -18,11 +18,13 @@ const searchEndpoint = `${endpointRoot}/stname/listPub`;
 const detailsEndpoint = `${endpointRoot}/stname/detailsPub`;
 const placeTypeCode = "21400";
 const targets = [
+  ["150204", "青山区"],
   ["460302", "西沙区"],
   ["460303", "南沙区"],
   ["500157", "两江新区"],
   ["540481", "米林市"],
   ["540581", "错那市"],
+  ["653221", "和田县"],
   ["653228", "和康县"],
   ["653229", "和安县"],
   ["659012", "白杨市"],

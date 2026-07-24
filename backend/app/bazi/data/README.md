@@ -23,13 +23,13 @@
 
 - 行政区代码和名称：[`@aurouscia/china-areas@0.7.0`](https://www.npmjs.com/package/@aurouscia/china-areas)，
   MIT License，发布于 2026-05-18，上游为民政部国家地名信息库。
-- 2,841 条行政中心坐标：[`tmap-citycoordinate@1.0.1`](https://www.npmjs.com/package/tmap-citycoordinate)，
+- 2,839 条行政中心坐标：[`tmap-citycoordinate@1.0.1`](https://www.npmjs.com/package/tmap-citycoordinate)，
   MIT License，上游为腾讯地图行政中心坐标；该包未声明坐标系。
-- 8 条补齐坐标：民政部国家地名信息库公开检索接口，查询于 2026-07-24。每条均校验
+- 10 条补齐或纠错坐标：民政部国家地名信息库公开检索接口，查询于 2026-07-24。每条均校验
   名称、正式行政代码、县级行政区类型和行政层级，并按公开网页客户端使用的
   `EPSG:4326` 保存。
 
-覆盖统计为 `direct_code=2841`、`official_mca_api=8`、`fallback=0`。
+覆盖统计为 `direct_code=2839`、`official_mca_api=10`、`fallback=0`。
 
 ## 香港
 

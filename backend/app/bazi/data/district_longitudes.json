@@ -19,7 +19,7 @@
       "upstream": "Tencent Maps administrative center coordinates",
       "coordinate_reference": "Not declared by the package",
       "license": "MIT",
-      "record_count": 2841,
+      "record_count": 2839,
       "sha256": "9636146a43b84b67fd0b4e7385a345a27377b2f7bf37e5592cb7596dda074aa8"
     },
     "mca_national_geographical_names": {
@@ -28,15 +28,15 @@
       "search_endpoint": "https://dmfw.mca.gov.cn/9095/stname/listPub",
       "details_endpoint": "https://dmfw.mca.gov.cn/9095/stname/detailsPub",
       "coordinate_reference": "EPSG:4326 as exposed by the official web client",
-      "queried_at": "2026-07-24T12:47:17.063Z",
-      "record_count": 8,
-      "sha256": "ac404a8dbc4a9534c9e88cc4212f214ef05f7de0a218b60c2554654c0d1b839d"
+      "queried_at": "2026-07-24T17:40:35.273Z",
+      "record_count": 10,
+      "sha256": "2d5c408a1ead7ea54d82d32e6e7523ff15d8b5c562b8ee2b949293aee6145e6d"
     }
   },
   "coverage": {
     "total": 2849,
-    "direct_code": 2841,
-    "official_mca_api": 8,
+    "direct_code": 2839,
+    "official_mca_api": 10,
     "fallback": 0
   },
   "records": {
@@ -5933,15 +5933,15 @@
       "city_name": "包头市",
       "district_code": "150204",
       "district_name": "青山区",
-      "longitude": 114.4540191963,
-      "latitude": 30.6141810444,
+      "longitude": 109.897026602433,
+      "latitude": 40.642914138635,
       "precision": "district_center",
-      "coordinate_match": "direct_code",
+      "coordinate_match": "official_mca_api",
       "fallback": false,
-      "coordinate_source": "tmap-citycoordinate@1.0.1",
-      "source_id": "150204",
-      "source_code": "150204",
-      "source_place_code": null,
+      "coordinate_source": "中华人民共和国民政部国家地名信息库@2026-07-24",
+      "source_id": "81706d9e47c8e58581713c6c2ee3c2f3",
+      "source_code": "150204999",
+      "source_place_code": "15020499921400000000",
       "source_name": "青山区"
     },
     "150205": {
@@ -50501,15 +50501,15 @@
       "city_name": "和田地区",
       "district_code": "653221",
       "district_name": "和田县",
-      "longitude": 79.340431339,
-      "latitude": 35.6572542881,
+      "longitude": 79.9340833,
+      "latitude": 37.1072882,
       "precision": "district_center",
-      "coordinate_match": "direct_code",
+      "coordinate_match": "official_mca_api",
       "fallback": false,
-      "coordinate_source": "tmap-citycoordinate@1.0.1",
-      "source_id": "653221",
-      "source_code": "653221",
-      "source_place_code": null,
+      "coordinate_source": "中华人民共和国民政部国家地名信息库@2026-07-24",
+      "source_id": "6595c1132cdc1f47bea041ee10dd15f5",
+      "source_code": "653221999",
+      "source_place_code": "65322199921400000001",
       "source_name": "和田县"
     },
     "653222": {
