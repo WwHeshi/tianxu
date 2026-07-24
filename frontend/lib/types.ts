@@ -6,12 +6,12 @@ export interface CalculationPolicyInput {
   month_boundary: "solar_terms";
   day_boundary: "midnight";
   time_basis: "beijing_standard_time";
-  true_solar_time: true;
+  true_solar_time: boolean;
 }
 
 export interface ChartPreviewRequest {
   beijing_datetime: string;
-  birthplace: BirthplaceInput;
+  birthplace: BirthplaceInput | null;
   gender: Gender;
   calculation_policy?: CalculationPolicyInput;
 }
@@ -73,7 +73,7 @@ export interface CalculationPolicy {
 export interface NormalizedBirthInfo {
   beijing_datetime: string;
   true_solar_datetime: string;
-  birthplace: NormalizedBirthplace;
+  birthplace: NormalizedBirthplace | null;
   gender: Gender | "other";
 }
 
@@ -97,7 +97,7 @@ export interface ChartPreview {
     element_distribution: ElementDistribution;
   };
   calculation_policy: CalculationPolicy;
-  solar_time_adjustment: SolarTimeAdjustment;
+  solar_time_adjustment: SolarTimeAdjustment | null;
   engine: {
     name: string;
     version: string;

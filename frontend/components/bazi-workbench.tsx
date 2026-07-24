@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import { previewChart } from "@/lib/api";
+import { DateWheelPicker, TimeWheelPicker } from "@/components/date-wheel-picker";
 import {
   CHINA_PROVINCES,
   formatChinaBirthplace,
@@ -212,23 +213,28 @@ export function BaziWorkbench() {
       return;
     }
 
-    const resolvedBirthplace = resolveChinaBirthplace(
-      provinceCode,
-      secondLevelCode,
-      districtCode,
-    );
-    if (!resolvedBirthplace) {
-      setFormError("请选择完整的出生地区。");
-      return;
+    let birthplace: BirthplaceInput | null = null;
+    if (provinceCode) {
+      const resolvedBirthplace = resolveChinaBirthplace(
+        provinceCode,
+        secondLevelCode,
+        districtCode,
+      );
+      if (!resolvedBirthplace) {
+        setFormError("请选择完整的出生地区。");
+        return;
+      }
+      birthplace = resolvedBirthplace;
     }
-
-    const birthplace: BirthplaceInput = resolvedBirthplace;
 
     const request: ChartPreviewRequest = {
       beijing_datetime: `${birthDate}T${birthTime}:00`,
       birthplace,
       gender,
-      calculation_policy: DEFAULT_POLICY,
+      calculation_policy: {
+        ...DEFAULT_POLICY,
+        true_solar_time: birthplace !== null,
+      },
     };
 
     setLastRequest(request);
@@ -271,31 +277,27 @@ export function BaziWorkbench() {
             </div>
             <span className="step-badge">01 / 01</span>
           </div>
-          <p className="panel-intro">出生时间按北京时间填写，系统会根据出生区县校正为真太阳时。</p>
+          <p className="panel-intro">选择出生地点后，系统会根据出生区县校正为真太阳时。</p>
 
           <form onSubmit={handleSubmit} noValidate>
             <div className="field-grid">
-              <label className="field field-wide">
-                <span className="field-label"><CalendarDays size={15} aria-hidden="true" /> 出生日期</span>
-                <input
-                  type="date"
+              <div className="field field-wide">
+                <span className="field-label" id="birth-date-label"><CalendarDays size={15} aria-hidden="true" /> 出生日期</span>
+                <DateWheelPicker
                   value={birthDate}
-                  max={maxDate}
-                  onChange={(event) => setBirthDate(event.target.value)}
-                  required
-                  aria-required="true"
+                  maxDate={maxDate}
+                  onChange={setBirthDate}
+                  labelledBy="birth-date-label"
                 />
-              </label>
-              <label className="field field-wide">
-                <span className="field-label"><Clock3 size={15} aria-hidden="true" /> 出生时间（北京时间）</span>
-                <input
-                  type="time"
+              </div>
+              <div className="field field-wide">
+                <span className="field-label" id="birth-time-label"><Clock3 size={15} aria-hidden="true" /> 出生时间</span>
+                <TimeWheelPicker
                   value={birthTime}
-                  onChange={(event) => setBirthTime(event.target.value)}
-                  required
-                  aria-required="true"
+                  onChange={setBirthTime}
+                  labelledBy="birth-time-label"
                 />
-              </label>
+              </div>
               <div className="field field-wide">
                 <span className="field-label"><MapPin size={15} aria-hidden="true" /> 出生地点</span>
                 <div className="location-selects">
@@ -304,7 +306,7 @@ export function BaziWorkbench() {
                     onChange={(event) => handleProvinceChange(event.target.value)}
                     aria-label="出生省份"
                   >
-                    <option value="">请选择省份 / 直辖市</option>
+                    <option value="">未选择地点（按北京时间）</option>
                     {CHINA_PROVINCES.map((province) => (
                       <option key={province.code} value={province.code}>{province.name}</option>
                     ))}
@@ -441,14 +443,17 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
   const limitations = Array.isArray(chart.limitations) ? chart.limitations : [];
   const warnings = Array.isArray(chart.warnings) ? chart.warnings : [];
   const maxElementCount = Math.max(1, ...Object.values(distribution));
-  const birthplace = formatChinaBirthplace(normalized.birthplace);
+  const birthplace = normalized.birthplace
+    ? formatChinaBirthplace(normalized.birthplace)
+    : "未选择（按北京时间）";
   const solarTime = chart.solar_time_adjustment;
+  const usesTrueSolarTime = solarTime !== null && policy.true_solar_time !== false;
 
   return (
     <div className="chart-content">
       <div className="meta-strip">
         <div><span>北京时间</span><strong>{formatDateTime(normalized.beijing_datetime)}</strong></div>
-        <div><span>真太阳时</span><strong>{formatDateTime(normalized.true_solar_datetime)}</strong></div>
+        <div><span>{usesTrueSolarTime ? "真太阳时" : "排盘时间"}</span><strong>{formatDateTime(normalized.true_solar_datetime)}</strong></div>
         <div><span>出生地点</span><strong className="meta-value-wrap">{birthplace}</strong></div>
         <div><span>性别</span><strong>{normalized.gender === "female" ? "女" : "男"}</strong></div>
       </div>
@@ -478,22 +483,32 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
         </div>
       </section>
 
-      <section className="solar-time-section" aria-labelledby="solar-time-title">
-        <div className="section-heading">
-          <h3 id="solar-time-title">真太阳时校正</h3>
-          <span>{formatDateTime(normalized.beijing_datetime)} → {formatDateTime(normalized.true_solar_datetime)}</span>
-        </div>
-        <dl className="solar-time-grid">
-          <div><dt>出生地经度</dt><dd>{formatLongitude(solarTime?.longitude_degrees)}</dd></div>
-          <div><dt>标准经线</dt><dd>{formatLongitude(solarTime?.reference_meridian_degrees)}</dd></div>
-          <div><dt>经度修正</dt><dd>{formatMinutes(solarTime?.longitude_correction_minutes)}</dd></div>
-          <div><dt>均时差</dt><dd>{formatMinutes(solarTime?.equation_of_time_minutes)}</dd></div>
-          <div><dt>总修正</dt><dd>{formatMinutes(solarTime?.total_correction_minutes)}</dd></div>
-          <div><dt>地点精度</dt><dd>{formatLocationPrecision(solarTime?.location_precision)}</dd></div>
-          <div><dt>坐标匹配</dt><dd>{formatCoordinateMatch(solarTime?.coordinate_match)}</dd></div>
-          <div><dt>坐标数据</dt><dd>{readable(solarTime?.coordinate_source)}</dd></div>
-        </dl>
-      </section>
+      {solarTime ? (
+        <section className="solar-time-section" aria-labelledby="solar-time-title">
+          <div className="section-heading">
+            <h3 id="solar-time-title">真太阳时校正</h3>
+            <span>{formatDateTime(normalized.beijing_datetime)} → {formatDateTime(normalized.true_solar_datetime)}</span>
+          </div>
+          <dl className="solar-time-grid">
+            <div><dt>出生地经度</dt><dd>{formatLongitude(solarTime.longitude_degrees)}</dd></div>
+            <div><dt>标准经线</dt><dd>{formatLongitude(solarTime.reference_meridian_degrees)}</dd></div>
+            <div><dt>经度修正</dt><dd>{formatMinutes(solarTime.longitude_correction_minutes)}</dd></div>
+            <div><dt>均时差</dt><dd>{formatMinutes(solarTime.equation_of_time_minutes)}</dd></div>
+            <div><dt>总修正</dt><dd>{formatMinutes(solarTime.total_correction_minutes)}</dd></div>
+            <div><dt>地点精度</dt><dd>{formatLocationPrecision(solarTime.location_precision)}</dd></div>
+            <div><dt>坐标匹配</dt><dd>{formatCoordinateMatch(solarTime.coordinate_match)}</dd></div>
+            <div><dt>坐标数据</dt><dd>{readable(solarTime.coordinate_source)}</dd></div>
+          </dl>
+        </section>
+      ) : (
+        <section className="solar-time-section" aria-labelledby="solar-time-title">
+          <div className="section-heading">
+            <h3 id="solar-time-title">北京时间排盘</h3>
+            <span>未进行真太阳时校正</span>
+          </div>
+          <p className="muted-copy">未选择出生地点，本次直接使用输入的北京时间。</p>
+        </section>
+      )}
 
       <div className="detail-grid">
         <section className="detail-section" aria-labelledby="elements-title">

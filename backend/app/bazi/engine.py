@@ -60,9 +60,13 @@ SOLAR_TIME_NOTE = (
     "所有地区统一输入北京时间；系统按出生地静态代表点经度相对东经 120°进行修正，"
     "并使用 NOAA 近似公式计算均时差后得到真太阳时。地点时区仅作为元数据，不参与换算。"
 )
+BEIJING_TIME_NOTE = (
+    "未选择出生地点，系统未进行经度修正或均时差计算，已按输入的北京时间直接排盘。"
+)
 LIMITATIONS = [
     "经度取静态区级代表点；同一区域内的实际出生地点仍可能带来少量时间误差。",
-    "规则 v1 使用真太阳时并在 00:00 换日；接近换日、时辰或节气边界时应结合具体地址复核。",
+    "提供出生地点时使用真太阳时；未提供地点时使用北京时间。规则 v1 均在所选时间基准的 00:00 换日。",
+    "接近换日、时辰或节气边界时，应复核出生时间；真太阳时模式还应结合具体地址复核。",
     "均时差使用 NOAA 近似公式，节气表由排盘库提供，边界样例仍需独立历书交叉校验。",
     "性别当前仅用于记录，v1 尚未计算大运、起运和流年。",
     "五行分布是不加权计数，不代表旺衰或强弱评分。",
@@ -103,7 +107,25 @@ def _minutes_from_pillar_boundary(value: datetime) -> float:
 
 def _normalize_birth(
     birth: BirthInput,
-) -> tuple[NormalizedBirthInput, SolarTimeAdjustment, list[str]]:
+) -> tuple[NormalizedBirthInput, SolarTimeAdjustment | None, list[str]]:
+    if birth.birthplace is None:
+        warnings = [
+            "未选择出生地点，已关闭真太阳时校正并按北京时间直接排盘；"
+            "结果可能与按出生地真太阳时排盘不同"
+        ]
+        if _minutes_from_pillar_boundary(birth.beijing_datetime) <= 10:
+            warnings.append("北京时间接近换日或时辰边界，请复核出生时间")
+        return (
+            NormalizedBirthInput(
+                beijing_datetime=birth.beijing_datetime,
+                true_solar_datetime=birth.beijing_datetime,
+                birthplace=None,
+                gender=birth.gender,
+            ),
+            None,
+            warnings,
+        )
+
     try:
         location = get_location(birth.birthplace.location_id)
     except BirthplaceCoordinateError as exc:
@@ -273,7 +295,9 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
             name=ENGINE_NAME,
             version=ENGINE_VERSION,
             policy_version=birth.calculation_policy.version,
-            solar_time_note=SOLAR_TIME_NOTE,
+            solar_time_note=(
+                SOLAR_TIME_NOTE if solar_time_adjustment is not None else BEIJING_TIME_NOTE
+            ),
         ),
         warnings=warnings,
         limitations=LIMITATIONS,

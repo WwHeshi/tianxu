@@ -2,9 +2,9 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .bazi.policy import CalculationPolicy
 
@@ -50,9 +50,31 @@ class BirthInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     beijing_datetime: datetime
-    birthplace: Birthplace
+    birthplace: Birthplace | None = None
     gender: Gender
     calculation_policy: CalculationPolicy = Field(default_factory=CalculationPolicy)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_time_mode_from_birthplace(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        values = dict(data)
+        raw_policy = values.get("calculation_policy", {})
+        if isinstance(raw_policy, dict):
+            policy = dict(raw_policy)
+            policy.setdefault("true_solar_time", values.get("birthplace") is not None)
+            values["calculation_policy"] = policy
+        return values
+
+    @model_validator(mode="after")
+    def require_consistent_time_mode(self) -> "BirthInput":
+        if self.birthplace is None and self.calculation_policy.true_solar_time:
+            raise ValueError("未选择出生地点时，true_solar_time 必须为 false")
+        if self.birthplace is not None and not self.calculation_policy.true_solar_time:
+            raise ValueError("已选择出生地点时，true_solar_time 必须为 true")
+        return self
 
     @field_validator("beijing_datetime")
     @classmethod
@@ -65,7 +87,7 @@ class BirthInput(BaseModel):
 class NormalizedBirthInput(BaseModel):
     beijing_datetime: datetime
     true_solar_datetime: datetime
-    birthplace: CanonicalBirthplace
+    birthplace: CanonicalBirthplace | None
     gender: Gender
 
 
@@ -139,7 +161,7 @@ class ChartPreviewResponse(BaseModel):
     normalized_input: NormalizedBirthInput
     chart: Chart
     calculation_policy: CalculationPolicy
-    solar_time_adjustment: SolarTimeAdjustment
+    solar_time_adjustment: SolarTimeAdjustment | None
     engine: EngineInfo
     warnings: list[str]
     limitations: list[str]

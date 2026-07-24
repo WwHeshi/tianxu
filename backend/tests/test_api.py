@@ -120,6 +120,39 @@ async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "optional_fields",
+    [
+        {},
+        {"birthplace": None},
+        {"birthplace": None, "calculation_policy": {}},
+        {"birthplace": None, "calculation_policy": {"true_solar_time": False}},
+    ],
+    ids=["birthplace-omitted", "birthplace-null", "empty-policy", "explicit-false"],
+)
+async def test_preview_without_birthplace_uses_beijing_time_directly(
+    client: AsyncClient,
+    optional_fields: dict[str, object],
+) -> None:
+    payload = {
+        "beijing_datetime": "1990-01-01T12:00:00",
+        "gender": "male",
+    } | optional_fields
+
+    response = await client.post("/api/v1/charts/preview", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["calculation_policy"]["true_solar_time"] is False
+    assert data["normalized_input"]["birthplace"] is None
+    assert data["normalized_input"]["beijing_datetime"] == "1990-01-01T12:00:00"
+    assert data["normalized_input"]["true_solar_datetime"] == "1990-01-01T12:00:00"
+    assert data["solar_time_adjustment"] is None
+    assert any("按北京时间直接排盘" in warning for warning in data["warnings"])
+    assert "未选择出生地点" in data["engine"]["solar_time_note"]
+
+
+@pytest.mark.asyncio
 async def test_beijing_district_without_city_level_is_supported(client: AsyncClient) -> None:
     birthplace = beijing_chaoyang_birthplace()
     response = await client.post(
@@ -252,13 +285,30 @@ async def test_removed_macau_statistical_zone_id_is_rejected(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_policy_cannot_disable_true_solar_time(client: AsyncClient) -> None:
+async def test_birthplace_cannot_disable_true_solar_time(client: AsyncClient) -> None:
     response = await client.post(
         "/api/v1/charts/preview",
         json=valid_payload() | {"calculation_policy": {"true_solar_time": False}},
     )
 
     assert response.status_code == 422
+    assert "已选择出生地点" in response.text
+
+
+@pytest.mark.asyncio
+async def test_missing_birthplace_cannot_enable_true_solar_time(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/charts/preview",
+        json={
+            "beijing_datetime": "1990-01-01T12:00:00",
+            "birthplace": None,
+            "gender": "male",
+            "calculation_policy": {"true_solar_time": True},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "未选择出生地点" in response.text
 
 
 @pytest.mark.asyncio

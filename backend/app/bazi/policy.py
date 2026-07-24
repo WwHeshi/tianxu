@@ -19,7 +19,7 @@ class CalculationPolicy(BaseModel):
     month_boundary: Literal["solar_terms"] = "solar_terms"
     day_boundary: Literal["midnight"] = "midnight"
     time_basis: Literal["beijing_standard_time"] = "beijing_standard_time"
-    true_solar_time: Literal[True] = True
+    true_solar_time: bool = True
 
 
 DEFAULT_POLICY = CalculationPolicy()

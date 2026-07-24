@@ -62,6 +62,24 @@ def test_tianhe_longitude_and_noaa_adjustment_are_applied() -> None:
     assert adjustment.coordinate_source
 
 
+def test_missing_birthplace_uses_beijing_clock_without_solar_adjustment() -> None:
+    beijing = datetime(1990, 1, 1, 12)
+    birth = BirthInput(
+        beijing_datetime=beijing,
+        gender="female",
+    )
+
+    result = calculate_chart(birth)
+
+    assert birth.calculation_policy.true_solar_time is False
+    assert result.normalized_input.beijing_datetime == beijing
+    assert result.normalized_input.true_solar_datetime == beijing
+    assert result.normalized_input.birthplace is None
+    assert result.solar_time_adjustment is None
+    assert any("按北京时间直接排盘" in warning for warning in result.warnings)
+    assert "未选择出生地点" in result.engine.solar_time_note
+
+
 def test_official_mca_coordinate_is_used_without_fallback() -> None:
     result = calculate("1990-01-01T12:00:00", CHONGQING_LIANGJIANG)
     adjustment = result.solar_time_adjustment
