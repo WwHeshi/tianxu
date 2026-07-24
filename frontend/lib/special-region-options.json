@@ -1,0 +1,2545 @@
+{
+  "schema_version": "tianxu.special-region-options.v1",
+  "generated_at": "2026-07-25",
+  "provinces": [
+    {
+      "code": "CN-HK",
+      "name": "香港特别行政区",
+      "location_id": null,
+      "children": [
+        {
+          "code": "CN-HK:DCD:A",
+          "name": "中西区",
+          "location_id": "CN-HK:DCD:A",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:B",
+          "name": "湾仔区",
+          "location_id": "CN-HK:DCD:B",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:C",
+          "name": "东区",
+          "location_id": "CN-HK:DCD:C",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:D",
+          "name": "南区",
+          "location_id": "CN-HK:DCD:D",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:E",
+          "name": "油尖旺区",
+          "location_id": "CN-HK:DCD:E",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:F",
+          "name": "深水埗区",
+          "location_id": "CN-HK:DCD:F",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:G",
+          "name": "九龙城区",
+          "location_id": "CN-HK:DCD:G",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:H",
+          "name": "黄大仙区",
+          "location_id": "CN-HK:DCD:H",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:J",
+          "name": "观塘区",
+          "location_id": "CN-HK:DCD:J",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:K",
+          "name": "荃湾区",
+          "location_id": "CN-HK:DCD:K",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:L",
+          "name": "屯门区",
+          "location_id": "CN-HK:DCD:L",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:M",
+          "name": "元朗区",
+          "location_id": "CN-HK:DCD:M",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:N",
+          "name": "北区",
+          "location_id": "CN-HK:DCD:N",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:P",
+          "name": "大埔区",
+          "location_id": "CN-HK:DCD:P",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:Q",
+          "name": "西贡区",
+          "location_id": "CN-HK:DCD:Q",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:R",
+          "name": "沙田区",
+          "location_id": "CN-HK:DCD:R",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:S",
+          "name": "葵青区",
+          "location_id": "CN-HK:DCD:S",
+          "children": []
+        },
+        {
+          "code": "CN-HK:DCD:T",
+          "name": "离岛区",
+          "location_id": "CN-HK:DCD:T",
+          "children": []
+        }
+      ]
+    },
+    {
+      "code": "CN-MO",
+      "name": "澳门特别行政区",
+      "location_id": null,
+      "children": [
+        {
+          "code": "CN-MO:AREA:01",
+          "name": "花地玛堂区",
+          "location_id": "CN-MO:AREA:01",
+          "children": []
+        },
+        {
+          "code": "CN-MO:AREA:02",
+          "name": "圣安多尼堂区",
+          "location_id": "CN-MO:AREA:02",
+          "children": []
+        },
+        {
+          "code": "CN-MO:AREA:03",
+          "name": "大堂区",
+          "location_id": "CN-MO:AREA:03",
+          "children": []
+        },
+        {
+          "code": "CN-MO:AREA:04",
+          "name": "望德堂区",
+          "location_id": "CN-MO:AREA:04",
+          "children": []
+        },
+        {
+          "code": "CN-MO:AREA:05",
+          "name": "风顺堂区",
+          "location_id": "CN-MO:AREA:05",
+          "children": []
+        },
+        {
+          "code": "CN-MO:AREA:06",
+          "name": "嘉模堂区",
+          "location_id": "CN-MO:AREA:06",
+          "children": []
+        },
+        {
+          "code": "CN-MO:AREA:07",
+          "name": "路氹城",
+          "location_id": "CN-MO:AREA:07",
+          "children": []
+        },
+        {
+          "code": "CN-MO:AREA:08",
+          "name": "圣方济各堂区",
+          "location_id": "CN-MO:AREA:08",
+          "children": []
+        }
+      ]
+    },
+    {
+      "code": "CN-TW",
+      "name": "台湾地区",
+      "location_id": null,
+      "children": [
+        {
+          "code": "CN-TW:COUNTY:09007",
+          "name": "连江县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:09007010",
+              "name": "南竿乡",
+              "location_id": "CN-TW:TOWN:09007010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09007020",
+              "name": "北竿乡",
+              "location_id": "CN-TW:TOWN:09007020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09007030",
+              "name": "莒光乡",
+              "location_id": "CN-TW:TOWN:09007030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09007040",
+              "name": "东引乡",
+              "location_id": "CN-TW:TOWN:09007040",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:09020",
+          "name": "金门县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:09020010",
+              "name": "金城镇",
+              "location_id": "CN-TW:TOWN:09020010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09020020",
+              "name": "金沙镇",
+              "location_id": "CN-TW:TOWN:09020020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09020030",
+              "name": "金湖镇",
+              "location_id": "CN-TW:TOWN:09020030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09020040",
+              "name": "金宁乡",
+              "location_id": "CN-TW:TOWN:09020040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09020050",
+              "name": "烈屿乡",
+              "location_id": "CN-TW:TOWN:09020050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:09020060",
+              "name": "乌坵乡",
+              "location_id": "CN-TW:TOWN:09020060",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10002",
+          "name": "宜兰县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10002010",
+              "name": "宜兰市",
+              "location_id": "CN-TW:TOWN:10002010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002020",
+              "name": "罗东镇",
+              "location_id": "CN-TW:TOWN:10002020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002030",
+              "name": "苏澳镇",
+              "location_id": "CN-TW:TOWN:10002030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002040",
+              "name": "头城镇",
+              "location_id": "CN-TW:TOWN:10002040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002050",
+              "name": "礁溪乡",
+              "location_id": "CN-TW:TOWN:10002050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002060",
+              "name": "壮围乡",
+              "location_id": "CN-TW:TOWN:10002060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002070",
+              "name": "员山乡",
+              "location_id": "CN-TW:TOWN:10002070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002080",
+              "name": "冬山乡",
+              "location_id": "CN-TW:TOWN:10002080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002090",
+              "name": "五结乡",
+              "location_id": "CN-TW:TOWN:10002090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002100",
+              "name": "三星乡",
+              "location_id": "CN-TW:TOWN:10002100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002110",
+              "name": "大同乡",
+              "location_id": "CN-TW:TOWN:10002110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10002120",
+              "name": "南澳乡",
+              "location_id": "CN-TW:TOWN:10002120",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10004",
+          "name": "新竹县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10004010",
+              "name": "竹北市",
+              "location_id": "CN-TW:TOWN:10004010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004020",
+              "name": "竹东镇",
+              "location_id": "CN-TW:TOWN:10004020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004030",
+              "name": "新埔镇",
+              "location_id": "CN-TW:TOWN:10004030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004040",
+              "name": "关西镇",
+              "location_id": "CN-TW:TOWN:10004040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004050",
+              "name": "湖口乡",
+              "location_id": "CN-TW:TOWN:10004050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004060",
+              "name": "新丰乡",
+              "location_id": "CN-TW:TOWN:10004060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004070",
+              "name": "芎林乡",
+              "location_id": "CN-TW:TOWN:10004070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004080",
+              "name": "横山乡",
+              "location_id": "CN-TW:TOWN:10004080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004090",
+              "name": "北埔乡",
+              "location_id": "CN-TW:TOWN:10004090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004100",
+              "name": "宝山乡",
+              "location_id": "CN-TW:TOWN:10004100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004110",
+              "name": "峨眉乡",
+              "location_id": "CN-TW:TOWN:10004110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004120",
+              "name": "尖石乡",
+              "location_id": "CN-TW:TOWN:10004120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10004130",
+              "name": "五峰乡",
+              "location_id": "CN-TW:TOWN:10004130",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10005",
+          "name": "苗栗县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10005010",
+              "name": "苗栗市",
+              "location_id": "CN-TW:TOWN:10005010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005020",
+              "name": "苑里镇",
+              "location_id": "CN-TW:TOWN:10005020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005030",
+              "name": "通霄镇",
+              "location_id": "CN-TW:TOWN:10005030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005040",
+              "name": "竹南镇",
+              "location_id": "CN-TW:TOWN:10005040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005050",
+              "name": "头份市",
+              "location_id": "CN-TW:TOWN:10005050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005060",
+              "name": "后龙镇",
+              "location_id": "CN-TW:TOWN:10005060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005070",
+              "name": "卓兰镇",
+              "location_id": "CN-TW:TOWN:10005070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005080",
+              "name": "大湖乡",
+              "location_id": "CN-TW:TOWN:10005080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005090",
+              "name": "公馆乡",
+              "location_id": "CN-TW:TOWN:10005090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005100",
+              "name": "铜锣乡",
+              "location_id": "CN-TW:TOWN:10005100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005110",
+              "name": "南庄乡",
+              "location_id": "CN-TW:TOWN:10005110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005120",
+              "name": "头屋乡",
+              "location_id": "CN-TW:TOWN:10005120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005130",
+              "name": "三义乡",
+              "location_id": "CN-TW:TOWN:10005130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005140",
+              "name": "西湖乡",
+              "location_id": "CN-TW:TOWN:10005140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005150",
+              "name": "造桥乡",
+              "location_id": "CN-TW:TOWN:10005150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005160",
+              "name": "三湾乡",
+              "location_id": "CN-TW:TOWN:10005160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005170",
+              "name": "狮潭乡",
+              "location_id": "CN-TW:TOWN:10005170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10005180",
+              "name": "泰安乡",
+              "location_id": "CN-TW:TOWN:10005180",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10007",
+          "name": "彰化县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10007010",
+              "name": "彰化市",
+              "location_id": "CN-TW:TOWN:10007010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007020",
+              "name": "鹿港镇",
+              "location_id": "CN-TW:TOWN:10007020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007030",
+              "name": "和美镇",
+              "location_id": "CN-TW:TOWN:10007030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007040",
+              "name": "线西乡",
+              "location_id": "CN-TW:TOWN:10007040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007050",
+              "name": "伸港乡",
+              "location_id": "CN-TW:TOWN:10007050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007060",
+              "name": "福兴乡",
+              "location_id": "CN-TW:TOWN:10007060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007070",
+              "name": "秀水乡",
+              "location_id": "CN-TW:TOWN:10007070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007080",
+              "name": "花坛乡",
+              "location_id": "CN-TW:TOWN:10007080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007090",
+              "name": "芬园乡",
+              "location_id": "CN-TW:TOWN:10007090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007100",
+              "name": "员林市",
+              "location_id": "CN-TW:TOWN:10007100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007110",
+              "name": "溪湖镇",
+              "location_id": "CN-TW:TOWN:10007110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007120",
+              "name": "田中镇",
+              "location_id": "CN-TW:TOWN:10007120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007130",
+              "name": "大村乡",
+              "location_id": "CN-TW:TOWN:10007130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007140",
+              "name": "埔盐乡",
+              "location_id": "CN-TW:TOWN:10007140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007150",
+              "name": "埔心乡",
+              "location_id": "CN-TW:TOWN:10007150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007160",
+              "name": "永靖乡",
+              "location_id": "CN-TW:TOWN:10007160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007170",
+              "name": "社头乡",
+              "location_id": "CN-TW:TOWN:10007170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007180",
+              "name": "二水乡",
+              "location_id": "CN-TW:TOWN:10007180",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007190",
+              "name": "北斗镇",
+              "location_id": "CN-TW:TOWN:10007190",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007200",
+              "name": "二林镇",
+              "location_id": "CN-TW:TOWN:10007200",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007210",
+              "name": "田尾乡",
+              "location_id": "CN-TW:TOWN:10007210",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007220",
+              "name": "埤头乡",
+              "location_id": "CN-TW:TOWN:10007220",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007230",
+              "name": "芳苑乡",
+              "location_id": "CN-TW:TOWN:10007230",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007240",
+              "name": "大城乡",
+              "location_id": "CN-TW:TOWN:10007240",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007250",
+              "name": "竹塘乡",
+              "location_id": "CN-TW:TOWN:10007250",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10007260",
+              "name": "溪州乡",
+              "location_id": "CN-TW:TOWN:10007260",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10008",
+          "name": "南投县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10008010",
+              "name": "南投市",
+              "location_id": "CN-TW:TOWN:10008010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008020",
+              "name": "埔里镇",
+              "location_id": "CN-TW:TOWN:10008020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008030",
+              "name": "草屯镇",
+              "location_id": "CN-TW:TOWN:10008030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008040",
+              "name": "竹山镇",
+              "location_id": "CN-TW:TOWN:10008040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008050",
+              "name": "集集镇",
+              "location_id": "CN-TW:TOWN:10008050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008060",
+              "name": "名间乡",
+              "location_id": "CN-TW:TOWN:10008060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008070",
+              "name": "鹿谷乡",
+              "location_id": "CN-TW:TOWN:10008070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008080",
+              "name": "中寮乡",
+              "location_id": "CN-TW:TOWN:10008080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008090",
+              "name": "鱼池乡",
+              "location_id": "CN-TW:TOWN:10008090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008100",
+              "name": "国姓乡",
+              "location_id": "CN-TW:TOWN:10008100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008110",
+              "name": "水里乡",
+              "location_id": "CN-TW:TOWN:10008110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008120",
+              "name": "信义乡",
+              "location_id": "CN-TW:TOWN:10008120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10008130",
+              "name": "仁爱乡",
+              "location_id": "CN-TW:TOWN:10008130",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10009",
+          "name": "云林县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10009010",
+              "name": "斗六市",
+              "location_id": "CN-TW:TOWN:10009010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009020",
+              "name": "斗南镇",
+              "location_id": "CN-TW:TOWN:10009020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009030",
+              "name": "虎尾镇",
+              "location_id": "CN-TW:TOWN:10009030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009040",
+              "name": "西螺镇",
+              "location_id": "CN-TW:TOWN:10009040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009050",
+              "name": "土库镇",
+              "location_id": "CN-TW:TOWN:10009050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009060",
+              "name": "北港镇",
+              "location_id": "CN-TW:TOWN:10009060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009070",
+              "name": "古坑乡",
+              "location_id": "CN-TW:TOWN:10009070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009080",
+              "name": "大埤乡",
+              "location_id": "CN-TW:TOWN:10009080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009090",
+              "name": "莿桐乡",
+              "location_id": "CN-TW:TOWN:10009090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009100",
+              "name": "林内乡",
+              "location_id": "CN-TW:TOWN:10009100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009110",
+              "name": "二仑乡",
+              "location_id": "CN-TW:TOWN:10009110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009120",
+              "name": "仑背乡",
+              "location_id": "CN-TW:TOWN:10009120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009130",
+              "name": "麦寮乡",
+              "location_id": "CN-TW:TOWN:10009130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009140",
+              "name": "东势乡",
+              "location_id": "CN-TW:TOWN:10009140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009150",
+              "name": "褒忠乡",
+              "location_id": "CN-TW:TOWN:10009150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009160",
+              "name": "台西乡",
+              "location_id": "CN-TW:TOWN:10009160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009170",
+              "name": "元长乡",
+              "location_id": "CN-TW:TOWN:10009170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009180",
+              "name": "四湖乡",
+              "location_id": "CN-TW:TOWN:10009180",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009190",
+              "name": "口湖乡",
+              "location_id": "CN-TW:TOWN:10009190",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10009200",
+              "name": "水林乡",
+              "location_id": "CN-TW:TOWN:10009200",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10010",
+          "name": "嘉义县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10010010",
+              "name": "太保市",
+              "location_id": "CN-TW:TOWN:10010010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010020",
+              "name": "朴子市",
+              "location_id": "CN-TW:TOWN:10010020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010030",
+              "name": "布袋镇",
+              "location_id": "CN-TW:TOWN:10010030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010040",
+              "name": "大林镇",
+              "location_id": "CN-TW:TOWN:10010040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010050",
+              "name": "民雄乡",
+              "location_id": "CN-TW:TOWN:10010050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010060",
+              "name": "溪口乡",
+              "location_id": "CN-TW:TOWN:10010060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010070",
+              "name": "新港乡",
+              "location_id": "CN-TW:TOWN:10010070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010080",
+              "name": "六脚乡",
+              "location_id": "CN-TW:TOWN:10010080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010090",
+              "name": "东石乡",
+              "location_id": "CN-TW:TOWN:10010090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010100",
+              "name": "义竹乡",
+              "location_id": "CN-TW:TOWN:10010100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010110",
+              "name": "鹿草乡",
+              "location_id": "CN-TW:TOWN:10010110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010120",
+              "name": "水上乡",
+              "location_id": "CN-TW:TOWN:10010120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010130",
+              "name": "中埔乡",
+              "location_id": "CN-TW:TOWN:10010130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010140",
+              "name": "竹崎乡",
+              "location_id": "CN-TW:TOWN:10010140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010150",
+              "name": "梅山乡",
+              "location_id": "CN-TW:TOWN:10010150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010160",
+              "name": "番路乡",
+              "location_id": "CN-TW:TOWN:10010160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010170",
+              "name": "大埔乡",
+              "location_id": "CN-TW:TOWN:10010170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10010180",
+              "name": "阿里山乡",
+              "location_id": "CN-TW:TOWN:10010180",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10013",
+          "name": "屏东县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10013010",
+              "name": "屏东市",
+              "location_id": "CN-TW:TOWN:10013010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013020",
+              "name": "潮州镇",
+              "location_id": "CN-TW:TOWN:10013020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013030",
+              "name": "东港镇",
+              "location_id": "CN-TW:TOWN:10013030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013040",
+              "name": "恒春镇",
+              "location_id": "CN-TW:TOWN:10013040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013050",
+              "name": "万丹乡",
+              "location_id": "CN-TW:TOWN:10013050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013060",
+              "name": "长治乡",
+              "location_id": "CN-TW:TOWN:10013060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013070",
+              "name": "麟洛乡",
+              "location_id": "CN-TW:TOWN:10013070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013080",
+              "name": "九如乡",
+              "location_id": "CN-TW:TOWN:10013080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013090",
+              "name": "里港乡",
+              "location_id": "CN-TW:TOWN:10013090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013100",
+              "name": "盐埔乡",
+              "location_id": "CN-TW:TOWN:10013100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013110",
+              "name": "高树乡",
+              "location_id": "CN-TW:TOWN:10013110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013120",
+              "name": "万峦乡",
+              "location_id": "CN-TW:TOWN:10013120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013130",
+              "name": "内埔乡",
+              "location_id": "CN-TW:TOWN:10013130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013140",
+              "name": "竹田乡",
+              "location_id": "CN-TW:TOWN:10013140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013150",
+              "name": "新埤乡",
+              "location_id": "CN-TW:TOWN:10013150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013160",
+              "name": "枋寮乡",
+              "location_id": "CN-TW:TOWN:10013160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013170",
+              "name": "新园乡",
+              "location_id": "CN-TW:TOWN:10013170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013180",
+              "name": "崁顶乡",
+              "location_id": "CN-TW:TOWN:10013180",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013190",
+              "name": "林边乡",
+              "location_id": "CN-TW:TOWN:10013190",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013200",
+              "name": "南州乡",
+              "location_id": "CN-TW:TOWN:10013200",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013210",
+              "name": "佳冬乡",
+              "location_id": "CN-TW:TOWN:10013210",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013220",
+              "name": "琉球乡",
+              "location_id": "CN-TW:TOWN:10013220",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013230",
+              "name": "车城乡",
+              "location_id": "CN-TW:TOWN:10013230",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013240",
+              "name": "满州乡",
+              "location_id": "CN-TW:TOWN:10013240",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013250",
+              "name": "枋山乡",
+              "location_id": "CN-TW:TOWN:10013250",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013260",
+              "name": "三地门乡",
+              "location_id": "CN-TW:TOWN:10013260",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013270",
+              "name": "雾台乡",
+              "location_id": "CN-TW:TOWN:10013270",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013280",
+              "name": "玛家乡",
+              "location_id": "CN-TW:TOWN:10013280",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013290",
+              "name": "泰武乡",
+              "location_id": "CN-TW:TOWN:10013290",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013300",
+              "name": "来义乡",
+              "location_id": "CN-TW:TOWN:10013300",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013310",
+              "name": "春日乡",
+              "location_id": "CN-TW:TOWN:10013310",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013320",
+              "name": "狮子乡",
+              "location_id": "CN-TW:TOWN:10013320",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10013330",
+              "name": "牡丹乡",
+              "location_id": "CN-TW:TOWN:10013330",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10014",
+          "name": "台东县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10014010",
+              "name": "台东市",
+              "location_id": "CN-TW:TOWN:10014010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014020",
+              "name": "成功镇",
+              "location_id": "CN-TW:TOWN:10014020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014030",
+              "name": "关山镇",
+              "location_id": "CN-TW:TOWN:10014030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014040",
+              "name": "卑南乡",
+              "location_id": "CN-TW:TOWN:10014040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014050",
+              "name": "鹿野乡",
+              "location_id": "CN-TW:TOWN:10014050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014060",
+              "name": "池上乡",
+              "location_id": "CN-TW:TOWN:10014060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014070",
+              "name": "东河乡",
+              "location_id": "CN-TW:TOWN:10014070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014080",
+              "name": "长滨乡",
+              "location_id": "CN-TW:TOWN:10014080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014090",
+              "name": "太麻里乡",
+              "location_id": "CN-TW:TOWN:10014090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014100",
+              "name": "大武乡",
+              "location_id": "CN-TW:TOWN:10014100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014110",
+              "name": "绿岛乡",
+              "location_id": "CN-TW:TOWN:10014110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014120",
+              "name": "海端乡",
+              "location_id": "CN-TW:TOWN:10014120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014130",
+              "name": "延平乡",
+              "location_id": "CN-TW:TOWN:10014130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014140",
+              "name": "金峰乡",
+              "location_id": "CN-TW:TOWN:10014140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014150",
+              "name": "达仁乡",
+              "location_id": "CN-TW:TOWN:10014150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10014160",
+              "name": "兰屿乡",
+              "location_id": "CN-TW:TOWN:10014160",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10015",
+          "name": "花莲县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10015010",
+              "name": "花莲市",
+              "location_id": "CN-TW:TOWN:10015010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015020",
+              "name": "凤林镇",
+              "location_id": "CN-TW:TOWN:10015020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015030",
+              "name": "玉里镇",
+              "location_id": "CN-TW:TOWN:10015030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015040",
+              "name": "新城乡",
+              "location_id": "CN-TW:TOWN:10015040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015050",
+              "name": "吉安乡",
+              "location_id": "CN-TW:TOWN:10015050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015060",
+              "name": "寿丰乡",
+              "location_id": "CN-TW:TOWN:10015060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015070",
+              "name": "光复乡",
+              "location_id": "CN-TW:TOWN:10015070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015080",
+              "name": "丰滨乡",
+              "location_id": "CN-TW:TOWN:10015080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015090",
+              "name": "瑞穗乡",
+              "location_id": "CN-TW:TOWN:10015090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015100",
+              "name": "富里乡",
+              "location_id": "CN-TW:TOWN:10015100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015110",
+              "name": "秀林乡",
+              "location_id": "CN-TW:TOWN:10015110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015120",
+              "name": "万荣乡",
+              "location_id": "CN-TW:TOWN:10015120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10015130",
+              "name": "卓溪乡",
+              "location_id": "CN-TW:TOWN:10015130",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10016",
+          "name": "澎湖县",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10016010",
+              "name": "马公市",
+              "location_id": "CN-TW:TOWN:10016010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10016020",
+              "name": "湖西乡",
+              "location_id": "CN-TW:TOWN:10016020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10016030",
+              "name": "白沙乡",
+              "location_id": "CN-TW:TOWN:10016030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10016040",
+              "name": "西屿乡",
+              "location_id": "CN-TW:TOWN:10016040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10016050",
+              "name": "望安乡",
+              "location_id": "CN-TW:TOWN:10016050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10016060",
+              "name": "七美乡",
+              "location_id": "CN-TW:TOWN:10016060",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10017",
+          "name": "基隆市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10017010",
+              "name": "中正区",
+              "location_id": "CN-TW:TOWN:10017010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10017020",
+              "name": "七堵区",
+              "location_id": "CN-TW:TOWN:10017020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10017030",
+              "name": "暖暖区",
+              "location_id": "CN-TW:TOWN:10017030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10017040",
+              "name": "仁爱区",
+              "location_id": "CN-TW:TOWN:10017040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10017050",
+              "name": "中山区",
+              "location_id": "CN-TW:TOWN:10017050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10017060",
+              "name": "安乐区",
+              "location_id": "CN-TW:TOWN:10017060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10017070",
+              "name": "信义区",
+              "location_id": "CN-TW:TOWN:10017070",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10018",
+          "name": "新竹市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10018010",
+              "name": "东区",
+              "location_id": "CN-TW:TOWN:10018010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10018020",
+              "name": "北区",
+              "location_id": "CN-TW:TOWN:10018020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10018030",
+              "name": "香山区",
+              "location_id": "CN-TW:TOWN:10018030",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:10020",
+          "name": "嘉义市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:10020010",
+              "name": "东区",
+              "location_id": "CN-TW:TOWN:10020010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:10020020",
+              "name": "西区",
+              "location_id": "CN-TW:TOWN:10020020",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:63000",
+          "name": "台北市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:63000010",
+              "name": "松山区",
+              "location_id": "CN-TW:TOWN:63000010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000020",
+              "name": "信义区",
+              "location_id": "CN-TW:TOWN:63000020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000030",
+              "name": "大安区",
+              "location_id": "CN-TW:TOWN:63000030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000040",
+              "name": "中山区",
+              "location_id": "CN-TW:TOWN:63000040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000050",
+              "name": "中正区",
+              "location_id": "CN-TW:TOWN:63000050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000060",
+              "name": "大同区",
+              "location_id": "CN-TW:TOWN:63000060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000070",
+              "name": "万华区",
+              "location_id": "CN-TW:TOWN:63000070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000080",
+              "name": "文山区",
+              "location_id": "CN-TW:TOWN:63000080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000090",
+              "name": "南港区",
+              "location_id": "CN-TW:TOWN:63000090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000100",
+              "name": "内湖区",
+              "location_id": "CN-TW:TOWN:63000100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000110",
+              "name": "士林区",
+              "location_id": "CN-TW:TOWN:63000110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:63000120",
+              "name": "北投区",
+              "location_id": "CN-TW:TOWN:63000120",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:64000",
+          "name": "高雄市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:64000010",
+              "name": "盐埕区",
+              "location_id": "CN-TW:TOWN:64000010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000020",
+              "name": "鼓山区",
+              "location_id": "CN-TW:TOWN:64000020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000030",
+              "name": "左营区",
+              "location_id": "CN-TW:TOWN:64000030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000040",
+              "name": "楠梓区",
+              "location_id": "CN-TW:TOWN:64000040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000050",
+              "name": "三民区",
+              "location_id": "CN-TW:TOWN:64000050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000060",
+              "name": "新兴区",
+              "location_id": "CN-TW:TOWN:64000060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000070",
+              "name": "前金区",
+              "location_id": "CN-TW:TOWN:64000070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000080",
+              "name": "苓雅区",
+              "location_id": "CN-TW:TOWN:64000080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000090",
+              "name": "前镇区",
+              "location_id": "CN-TW:TOWN:64000090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000100",
+              "name": "旗津区",
+              "location_id": "CN-TW:TOWN:64000100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000110",
+              "name": "小港区",
+              "location_id": "CN-TW:TOWN:64000110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000120",
+              "name": "凤山区",
+              "location_id": "CN-TW:TOWN:64000120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000130",
+              "name": "林园区",
+              "location_id": "CN-TW:TOWN:64000130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000140",
+              "name": "大寮区",
+              "location_id": "CN-TW:TOWN:64000140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000150",
+              "name": "大树区",
+              "location_id": "CN-TW:TOWN:64000150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000160",
+              "name": "大社区",
+              "location_id": "CN-TW:TOWN:64000160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000170",
+              "name": "仁武区",
+              "location_id": "CN-TW:TOWN:64000170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000180",
+              "name": "鸟松区",
+              "location_id": "CN-TW:TOWN:64000180",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000190",
+              "name": "冈山区",
+              "location_id": "CN-TW:TOWN:64000190",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000200",
+              "name": "桥头区",
+              "location_id": "CN-TW:TOWN:64000200",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000210",
+              "name": "燕巢区",
+              "location_id": "CN-TW:TOWN:64000210",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000220",
+              "name": "田寮区",
+              "location_id": "CN-TW:TOWN:64000220",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000230",
+              "name": "阿莲区",
+              "location_id": "CN-TW:TOWN:64000230",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000240",
+              "name": "路竹区",
+              "location_id": "CN-TW:TOWN:64000240",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000250",
+              "name": "湖内区",
+              "location_id": "CN-TW:TOWN:64000250",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000260",
+              "name": "茄萣区",
+              "location_id": "CN-TW:TOWN:64000260",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000270",
+              "name": "永安区",
+              "location_id": "CN-TW:TOWN:64000270",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000280",
+              "name": "弥陀区",
+              "location_id": "CN-TW:TOWN:64000280",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000290",
+              "name": "梓官区",
+              "location_id": "CN-TW:TOWN:64000290",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000300",
+              "name": "旗山区",
+              "location_id": "CN-TW:TOWN:64000300",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000310",
+              "name": "美浓区",
+              "location_id": "CN-TW:TOWN:64000310",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000320",
+              "name": "六龟区",
+              "location_id": "CN-TW:TOWN:64000320",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000330",
+              "name": "甲仙区",
+              "location_id": "CN-TW:TOWN:64000330",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000340",
+              "name": "杉林区",
+              "location_id": "CN-TW:TOWN:64000340",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000350",
+              "name": "内门区",
+              "location_id": "CN-TW:TOWN:64000350",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000360",
+              "name": "茂林区",
+              "location_id": "CN-TW:TOWN:64000360",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000370",
+              "name": "桃源区",
+              "location_id": "CN-TW:TOWN:64000370",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:64000380",
+              "name": "那玛夏区",
+              "location_id": "CN-TW:TOWN:64000380",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:65000",
+          "name": "新北市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:65000010",
+              "name": "板桥区",
+              "location_id": "CN-TW:TOWN:65000010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000020",
+              "name": "三重区",
+              "location_id": "CN-TW:TOWN:65000020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000030",
+              "name": "中和区",
+              "location_id": "CN-TW:TOWN:65000030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000040",
+              "name": "永和区",
+              "location_id": "CN-TW:TOWN:65000040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000050",
+              "name": "新庄区",
+              "location_id": "CN-TW:TOWN:65000050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000060",
+              "name": "新店区",
+              "location_id": "CN-TW:TOWN:65000060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000070",
+              "name": "树林区",
+              "location_id": "CN-TW:TOWN:65000070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000080",
+              "name": "莺歌区",
+              "location_id": "CN-TW:TOWN:65000080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000090",
+              "name": "三峡区",
+              "location_id": "CN-TW:TOWN:65000090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000100",
+              "name": "淡水区",
+              "location_id": "CN-TW:TOWN:65000100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000110",
+              "name": "汐止区",
+              "location_id": "CN-TW:TOWN:65000110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000120",
+              "name": "瑞芳区",
+              "location_id": "CN-TW:TOWN:65000120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000130",
+              "name": "土城区",
+              "location_id": "CN-TW:TOWN:65000130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000140",
+              "name": "芦洲区",
+              "location_id": "CN-TW:TOWN:65000140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000150",
+              "name": "五股区",
+              "location_id": "CN-TW:TOWN:65000150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000160",
+              "name": "泰山区",
+              "location_id": "CN-TW:TOWN:65000160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000170",
+              "name": "林口区",
+              "location_id": "CN-TW:TOWN:65000170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000180",
+              "name": "深坑区",
+              "location_id": "CN-TW:TOWN:65000180",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000190",
+              "name": "石碇区",
+              "location_id": "CN-TW:TOWN:65000190",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000200",
+              "name": "坪林区",
+              "location_id": "CN-TW:TOWN:65000200",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000210",
+              "name": "三芝区",
+              "location_id": "CN-TW:TOWN:65000210",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000220",
+              "name": "石门区",
+              "location_id": "CN-TW:TOWN:65000220",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000230",
+              "name": "八里区",
+              "location_id": "CN-TW:TOWN:65000230",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000240",
+              "name": "平溪区",
+              "location_id": "CN-TW:TOWN:65000240",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000250",
+              "name": "双溪区",
+              "location_id": "CN-TW:TOWN:65000250",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000260",
+              "name": "贡寮区",
+              "location_id": "CN-TW:TOWN:65000260",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000270",
+              "name": "金山区",
+              "location_id": "CN-TW:TOWN:65000270",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000280",
+              "name": "万里区",
+              "location_id": "CN-TW:TOWN:65000280",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:65000290",
+              "name": "乌来区",
+              "location_id": "CN-TW:TOWN:65000290",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:66000",
+          "name": "台中市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:66000010",
+              "name": "中区",
+              "location_id": "CN-TW:TOWN:66000010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000020",
+              "name": "东区",
+              "location_id": "CN-TW:TOWN:66000020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000030",
+              "name": "南区",
+              "location_id": "CN-TW:TOWN:66000030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000040",
+              "name": "西区",
+              "location_id": "CN-TW:TOWN:66000040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000050",
+              "name": "北区",
+              "location_id": "CN-TW:TOWN:66000050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000060",
+              "name": "西屯区",
+              "location_id": "CN-TW:TOWN:66000060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000070",
+              "name": "南屯区",
+              "location_id": "CN-TW:TOWN:66000070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000080",
+              "name": "北屯区",
+              "location_id": "CN-TW:TOWN:66000080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000090",
+              "name": "丰原区",
+              "location_id": "CN-TW:TOWN:66000090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000100",
+              "name": "东势区",
+              "location_id": "CN-TW:TOWN:66000100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000110",
+              "name": "大甲区",
+              "location_id": "CN-TW:TOWN:66000110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000120",
+              "name": "清水区",
+              "location_id": "CN-TW:TOWN:66000120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000130",
+              "name": "沙鹿区",
+              "location_id": "CN-TW:TOWN:66000130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000140",
+              "name": "梧栖区",
+              "location_id": "CN-TW:TOWN:66000140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000150",
+              "name": "后里区",
+              "location_id": "CN-TW:TOWN:66000150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000160",
+              "name": "神冈区",
+              "location_id": "CN-TW:TOWN:66000160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000170",
+              "name": "潭子区",
+              "location_id": "CN-TW:TOWN:66000170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000180",
+              "name": "大雅区",
+              "location_id": "CN-TW:TOWN:66000180",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000190",
+              "name": "新社区",
+              "location_id": "CN-TW:TOWN:66000190",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000200",
+              "name": "石冈区",
+              "location_id": "CN-TW:TOWN:66000200",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000210",
+              "name": "外埔区",
+              "location_id": "CN-TW:TOWN:66000210",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000220",
+              "name": "大安区",
+              "location_id": "CN-TW:TOWN:66000220",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000230",
+              "name": "乌日区",
+              "location_id": "CN-TW:TOWN:66000230",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000240",
+              "name": "大肚区",
+              "location_id": "CN-TW:TOWN:66000240",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000250",
+              "name": "龙井区",
+              "location_id": "CN-TW:TOWN:66000250",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000260",
+              "name": "雾峰区",
+              "location_id": "CN-TW:TOWN:66000260",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000270",
+              "name": "太平区",
+              "location_id": "CN-TW:TOWN:66000270",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000280",
+              "name": "大里区",
+              "location_id": "CN-TW:TOWN:66000280",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:66000290",
+              "name": "和平区",
+              "location_id": "CN-TW:TOWN:66000290",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:67000",
+          "name": "台南市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:67000010",
+              "name": "新营区",
+              "location_id": "CN-TW:TOWN:67000010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000020",
+              "name": "盐水区",
+              "location_id": "CN-TW:TOWN:67000020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000030",
+              "name": "白河区",
+              "location_id": "CN-TW:TOWN:67000030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000040",
+              "name": "柳营区",
+              "location_id": "CN-TW:TOWN:67000040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000050",
+              "name": "后壁区",
+              "location_id": "CN-TW:TOWN:67000050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000060",
+              "name": "东山区",
+              "location_id": "CN-TW:TOWN:67000060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000070",
+              "name": "麻豆区",
+              "location_id": "CN-TW:TOWN:67000070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000080",
+              "name": "下营区",
+              "location_id": "CN-TW:TOWN:67000080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000090",
+              "name": "六甲区",
+              "location_id": "CN-TW:TOWN:67000090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000100",
+              "name": "官田区",
+              "location_id": "CN-TW:TOWN:67000100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000110",
+              "name": "大内区",
+              "location_id": "CN-TW:TOWN:67000110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000120",
+              "name": "佳里区",
+              "location_id": "CN-TW:TOWN:67000120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000130",
+              "name": "学甲区",
+              "location_id": "CN-TW:TOWN:67000130",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000140",
+              "name": "西港区",
+              "location_id": "CN-TW:TOWN:67000140",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000150",
+              "name": "七股区",
+              "location_id": "CN-TW:TOWN:67000150",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000160",
+              "name": "将军区",
+              "location_id": "CN-TW:TOWN:67000160",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000170",
+              "name": "北门区",
+              "location_id": "CN-TW:TOWN:67000170",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000180",
+              "name": "新化区",
+              "location_id": "CN-TW:TOWN:67000180",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000190",
+              "name": "善化区",
+              "location_id": "CN-TW:TOWN:67000190",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000200",
+              "name": "新市区",
+              "location_id": "CN-TW:TOWN:67000200",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000210",
+              "name": "安定区",
+              "location_id": "CN-TW:TOWN:67000210",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000220",
+              "name": "山上区",
+              "location_id": "CN-TW:TOWN:67000220",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000230",
+              "name": "玉井区",
+              "location_id": "CN-TW:TOWN:67000230",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000240",
+              "name": "楠西区",
+              "location_id": "CN-TW:TOWN:67000240",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000250",
+              "name": "南化区",
+              "location_id": "CN-TW:TOWN:67000250",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000260",
+              "name": "左镇区",
+              "location_id": "CN-TW:TOWN:67000260",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000270",
+              "name": "仁德区",
+              "location_id": "CN-TW:TOWN:67000270",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000280",
+              "name": "归仁区",
+              "location_id": "CN-TW:TOWN:67000280",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000290",
+              "name": "关庙区",
+              "location_id": "CN-TW:TOWN:67000290",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000300",
+              "name": "龙崎区",
+              "location_id": "CN-TW:TOWN:67000300",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000310",
+              "name": "永康区",
+              "location_id": "CN-TW:TOWN:67000310",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000320",
+              "name": "东区",
+              "location_id": "CN-TW:TOWN:67000320",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000330",
+              "name": "南区",
+              "location_id": "CN-TW:TOWN:67000330",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000340",
+              "name": "北区",
+              "location_id": "CN-TW:TOWN:67000340",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000350",
+              "name": "安南区",
+              "location_id": "CN-TW:TOWN:67000350",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000360",
+              "name": "安平区",
+              "location_id": "CN-TW:TOWN:67000360",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:67000370",
+              "name": "中西区",
+              "location_id": "CN-TW:TOWN:67000370",
+              "children": []
+            }
+          ]
+        },
+        {
+          "code": "CN-TW:COUNTY:68000",
+          "name": "桃园市",
+          "location_id": null,
+          "children": [
+            {
+              "code": "CN-TW:TOWN:68000010",
+              "name": "桃园区",
+              "location_id": "CN-TW:TOWN:68000010",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000020",
+              "name": "中坜区",
+              "location_id": "CN-TW:TOWN:68000020",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000030",
+              "name": "大溪区",
+              "location_id": "CN-TW:TOWN:68000030",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000040",
+              "name": "杨梅区",
+              "location_id": "CN-TW:TOWN:68000040",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000050",
+              "name": "芦竹区",
+              "location_id": "CN-TW:TOWN:68000050",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000060",
+              "name": "大园区",
+              "location_id": "CN-TW:TOWN:68000060",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000070",
+              "name": "龟山区",
+              "location_id": "CN-TW:TOWN:68000070",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000080",
+              "name": "八德区",
+              "location_id": "CN-TW:TOWN:68000080",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000090",
+              "name": "龙潭区",
+              "location_id": "CN-TW:TOWN:68000090",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000100",
+              "name": "平镇区",
+              "location_id": "CN-TW:TOWN:68000100",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000110",
+              "name": "新屋区",
+              "location_id": "CN-TW:TOWN:68000110",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000120",
+              "name": "观音区",
+              "location_id": "CN-TW:TOWN:68000120",
+              "children": []
+            },
+            {
+              "code": "CN-TW:TOWN:68000130",
+              "name": "复兴区",
+              "location_id": "CN-TW:TOWN:68000130",
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

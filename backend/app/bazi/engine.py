@@ -16,9 +16,11 @@ from lunar_python.util import LunarUtil
 from ..schemas import (
     BirthInput,
     BranchComponent,
+    CanonicalBirthplace,
     Chart,
     ChartPreviewResponse,
     Component,
+    DivisionPathItem,
     ElementDistribution,
     EngineInfo,
     HiddenStem,
@@ -27,7 +29,7 @@ from ..schemas import (
     Pillars,
     SolarTimeAdjustment,
 )
-from .locations import BirthplaceCoordinateError, get_district_coordinate
+from .locations import BirthplaceCoordinateError, LocationDataError, get_location
 
 
 class ChartCalculationError(RuntimeError):
@@ -55,11 +57,11 @@ GAN_POLARITY = {gan: ("yang" if index % 2 == 0 else "yin") for index, gan in enu
 ZHI_POLARITY = {zhi: ("yang" if index % 2 == 0 else "yin") for index, zhi in enumerate(ZHI)}
 
 SOLAR_TIME_NOTE = (
-    "用户输入北京时间；系统按出生地正式末级行政中心经度进行经度修正，"
-    "并使用 NOAA 近似公式计算均时差后得到真太阳时。"
+    "所有地区统一输入北京时间；系统按出生地静态代表点经度相对东经 120°进行修正，"
+    "并使用 NOAA 近似公式计算均时差后得到真太阳时。地点时区仅作为元数据，不参与换算。"
 )
 LIMITATIONS = [
-    "经度取正式末级行政中心点；同一行政区内的实际出生地点仍可能带来少量时间误差。",
+    "经度取静态区级代表点；同一区域内的实际出生地点仍可能带来少量时间误差。",
     "规则 v1 使用真太阳时并在 00:00 换日；接近换日、时辰或节气边界时应结合具体地址复核。",
     "均时差使用 NOAA 近似公式，节气表由排盘库提供，边界样例仍需独立历书交叉校验。",
     "性别当前仅用于记录，v1 尚未计算大运、起运和流年。",
@@ -103,16 +105,16 @@ def _normalize_birth(
     birth: BirthInput,
 ) -> tuple[NormalizedBirthInput, SolarTimeAdjustment, list[str]]:
     try:
-        coordinate = get_district_coordinate(birth.birthplace)
+        location = get_location(birth.birthplace.location_id)
     except BirthplaceCoordinateError as exc:
         raise ChartCalculationError(str(exc)) from exc
-    if coordinate.fallback or coordinate.coordinate_match.endswith("_fallback"):
-        raise ChartCalculationError(
+    if location.fallback or location.coordinate_match.endswith("_fallback"):
+        raise LocationDataError(
             f"该出生地区缺少独立坐标，系统禁止使用回退坐标："
-            f"{birth.birthplace.district_name}（{birth.birthplace.district_code}）"
+            f"{location.display_name}（{location.location_id}）"
         )
 
-    longitude_correction = 4 * (coordinate.longitude - coordinate.reference_meridian)
+    longitude_correction = 4 * (location.longitude - 120)
     equation_of_time = _equation_of_time_minutes(birth.beijing_datetime)
     total_correction = longitude_correction + equation_of_time
     true_solar_datetime = _round_to_second(
@@ -126,21 +128,29 @@ def _normalize_birth(
     normalized = NormalizedBirthInput(
         beijing_datetime=birth.beijing_datetime,
         true_solar_datetime=true_solar_datetime,
-        birthplace=birth.birthplace,
+        birthplace=CanonicalBirthplace(
+            location_id=location.location_id,
+            region_code=location.region_code,
+            timezone=location.timezone,
+            division_path=[
+                DivisionPathItem(code=item.code, name=item.name, type=item.type)
+                for item in location.division_path
+            ],
+        ),
         gender=birth.gender,
     )
     adjustment = SolarTimeAdjustment(
-        longitude_degrees=round(coordinate.longitude, 6),
+        longitude_degrees=round(location.longitude, 6),
         latitude_degrees=(
-            round(coordinate.latitude, 6) if coordinate.latitude is not None else None
+            round(location.latitude, 6) if location.latitude is not None else None
         ),
-        reference_meridian_degrees=coordinate.reference_meridian,
+        reference_meridian_degrees=120,
         longitude_correction_minutes=round(longitude_correction, 6),
         equation_of_time_minutes=round(equation_of_time, 6),
         total_correction_minutes=round(total_correction, 6),
-        location_precision=coordinate.precision,
-        coordinate_match=coordinate.coordinate_match,
-        coordinate_source=coordinate.source,
+        location_precision=location.precision,
+        coordinate_match=location.coordinate_match,
+        coordinate_source=location.coordinate_source,
     )
     return normalized, adjustment, warnings
 

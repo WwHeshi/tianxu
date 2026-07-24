@@ -6,6 +6,8 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.api import routes
+from app.bazi.locations import LocationDataError
 from app.main import app
 
 
@@ -17,38 +19,29 @@ async def client() -> AsyncIterator[AsyncClient]:
 
 
 def guangzhou_birthplace() -> dict[str, str]:
+    return {"location_id": "CN:440106"}
+
+
+def beijing_chaoyang_birthplace() -> dict[str, str]:
+    return {"location_id": "CN:110105"}
+
+
+def hainan_wuzhishan_birthplace() -> dict[str, str]:
+    return {"location_id": "CN:469001"}
+
+
+def canonical_birthplace(
+    location_id: str,
+    *path: tuple[str, str, str],
+) -> dict[str, object]:
     return {
-        "country_code": "CN",
-        "province_code": "440000",
-        "province_name": "广东省",
-        "city_code": "440100",
-        "city_name": "广州市",
-        "district_code": "440106",
-        "district_name": "天河区",
-    }
-
-
-def beijing_chaoyang_birthplace() -> dict[str, str | None]:
-    return {
-        "country_code": "CN",
-        "province_code": "110000",
-        "province_name": "北京市",
-        "city_code": None,
-        "city_name": None,
-        "district_code": "110105",
-        "district_name": "朝阳区",
-    }
-
-
-def hainan_wuzhishan_birthplace() -> dict[str, str | None]:
-    return {
-        "country_code": "CN",
-        "province_code": "460000",
-        "province_name": "海南省",
-        "city_code": None,
-        "city_name": None,
-        "district_code": "469001",
-        "district_name": "五指山市",
+        "location_id": location_id,
+        "region_code": "CN",
+        "timezone": "Asia/Shanghai",
+        "division_path": [
+            {"code": code, "name": name, "type": division_type}
+            for code, name, division_type in path
+        ],
     }
 
 
@@ -70,6 +63,22 @@ async def test_health(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_health_reports_unavailable_location_data(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable() -> int:
+        raise LocationDataError("地点数据不可用：special_region_locations.json")
+
+    monkeypatch.setattr(routes, "validate_location_data", unavailable)
+
+    response = await client.get("/api/v1/health")
+
+    assert response.status_code == 503
+    assert "地点数据不可用" in response.text
+
+
+@pytest.mark.asyncio
 async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient) -> None:
     response = await client.post("/api/v1/charts/preview", json=valid_payload())
 
@@ -83,7 +92,12 @@ async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient
         "hour": "甲午",
     }
     assert data["normalized_input"]["beijing_datetime"] == "1990-01-01T12:00:00"
-    assert data["normalized_input"]["birthplace"] == guangzhou_birthplace()
+    assert data["normalized_input"]["birthplace"] == canonical_birthplace(
+        "CN:440106",
+        ("440000", "广东省", "province"),
+        ("440100", "广州市", "city"),
+        ("440106", "天河区", "district"),
+    )
     assert data["calculation_policy"] == {
         "version": "v1",
         "year_boundary": "lichun",
@@ -115,7 +129,11 @@ async def test_beijing_district_without_city_level_is_supported(client: AsyncCli
 
     assert response.status_code == 200
     data = response.json()
-    assert data["normalized_input"]["birthplace"] == birthplace
+    assert data["normalized_input"]["birthplace"] == canonical_birthplace(
+        "CN:110105",
+        ("110000", "北京市", "province"),
+        ("110105", "朝阳区", "district"),
+    )
     assert data["solar_time_adjustment"]["longitude_degrees"] == pytest.approx(116.443136)
     assert data["solar_time_adjustment"]["coordinate_match"] == "direct_code"
 
@@ -130,31 +148,56 @@ async def test_hainan_direct_administered_county_is_supported(client: AsyncClien
 
     assert response.status_code == 200
     data = response.json()
-    assert data["normalized_input"]["birthplace"] == birthplace
+    assert data["normalized_input"]["birthplace"] == canonical_birthplace(
+        "CN:469001",
+        ("460000", "海南省", "province"),
+        ("469001", "五指山市", "district"),
+    )
     assert data["solar_time_adjustment"]["longitude_degrees"] == pytest.approx(109.516784)
     assert data["solar_time_adjustment"]["coordinate_match"] == "direct_code"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "birthplace",
+    ("location_id", "region_code", "timezone"),
     [
-        beijing_chaoyang_birthplace() | {"district_name": "伪造朝阳区"},
-        beijing_chaoyang_birthplace() | {"city_code": "110100", "city_name": "北京市"},
+        ("CN-HK:DCD:A", "CN-HK", "Asia/Hong_Kong"),
+        ("CN-MO:AREA:01", "CN-MO", "Asia/Macau"),
+        ("CN-TW:TOWN:10014020", "CN-TW", "Asia/Taipei"),
     ],
-    ids=["forged-name", "forged-city-hierarchy"],
 )
-async def test_forged_birthplace_name_or_hierarchy_is_rejected(
+async def test_special_region_location_can_preview_chart(
     client: AsyncClient,
-    birthplace: dict[str, str | None],
+    location_id: str,
+    region_code: str,
+    timezone: str,
 ) -> None:
+    response = await client.post(
+        "/api/v1/charts/preview",
+        json=valid_payload() | {"birthplace": {"location_id": location_id}},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["normalized_input"]["birthplace"]["location_id"] == location_id
+    assert data["normalized_input"]["birthplace"]["region_code"] == region_code
+    assert data["normalized_input"]["birthplace"]["timezone"] == timezone
+    assert data["solar_time_adjustment"]["reference_meridian_degrees"] == 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_field", ["district_name", "district_code", "province_code"])
+async def test_birthplace_accepts_only_location_id(
+    client: AsyncClient, legacy_field: str
+) -> None:
+    birthplace = beijing_chaoyang_birthplace() | {legacy_field: "伪造值"}
     response = await client.post(
         "/api/v1/charts/preview",
         json=valid_payload() | {"birthplace": birthplace},
     )
 
     assert response.status_code == 422
-    assert "官方区划不一致" in response.text
+    assert legacy_field in response.text
 
 
 @pytest.mark.asyncio
@@ -185,18 +228,27 @@ async def test_beijing_datetime_with_offset_is_rejected(client: AsyncClient) -> 
 
 @pytest.mark.asyncio
 async def test_unknown_district_is_rejected(client: AsyncClient) -> None:
-    unknown_birthplace = guangzhou_birthplace() | {
-        "district_code": "440999",
-        "district_name": "不存在区",
-    }
+    unknown_birthplace = {"location_id": "CN:440999"}
     response = await client.post(
         "/api/v1/charts/preview",
         json=valid_payload() | {"birthplace": unknown_birthplace},
     )
 
     assert response.status_code == 422
-    assert "暂不支持该出生地区" in response.text
+    assert "暂不支持该出生地点" in response.text
     assert "440999" in response.text
+
+
+@pytest.mark.asyncio
+async def test_removed_macau_statistical_zone_id_is_rejected(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/charts/preview",
+        json=valid_payload() | {"birthplace": {"location_id": "CN-MO:STAT:01"}},
+    )
+
+    assert response.status_code == 422
+    assert "暂不支持该出生地点" in response.text
+    assert "CN-MO:STAT:01" in response.text
 
 
 @pytest.mark.asyncio

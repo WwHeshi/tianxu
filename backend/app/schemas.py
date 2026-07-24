@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .bazi.policy import CalculationPolicy
 
@@ -16,38 +16,32 @@ class Gender(str, Enum):
 
 
 class Birthplace(BaseModel):
-    """A province/city/district selection using Chinese administrative codes."""
+    """A stable identifier selected from the bundled location snapshot."""
 
     model_config = ConfigDict(extra="forbid")
 
-    country_code: Literal["CN"] = "CN"
-    province_code: str = Field(pattern=r"^\d{6}$")
-    province_name: str = Field(min_length=1, max_length=32)
-    city_code: str | None = Field(default=None, pattern=r"^\d{6}$")
-    city_name: str | None = Field(default=None, min_length=1, max_length=64)
-    district_code: str = Field(pattern=r"^\d{6}$")
-    district_name: str = Field(min_length=1, max_length=64)
+    location_id: str = Field(min_length=1, max_length=128)
 
-    @field_validator("province_name", "district_name")
+    @field_validator("location_id")
     @classmethod
-    def strip_names(cls, value: str) -> str:
-        return value.strip()
+    def strip_location_id(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("出生地点标识不能为空")
+        return stripped
 
-    @field_validator("city_name")
-    @classmethod
-    def strip_optional_city_name(cls, value: str | None) -> str | None:
-        return value.strip() if value is not None else None
 
-    @model_validator(mode="after")
-    def validate_code_hierarchy(self) -> "Birthplace":
-        province_prefix = self.province_code[:2]
-        if (self.city_code is None) != (self.city_name is None):
-            raise ValueError("城市代码和城市名称必须同时提供或同时省略")
-        if self.city_code is not None and not self.city_code.startswith(province_prefix):
-            raise ValueError("城市代码与省级行政区不匹配")
-        if not self.district_code.startswith(province_prefix):
-            raise ValueError("区县代码与省级行政区不匹配")
-        return self
+class DivisionPathItem(BaseModel):
+    code: str
+    name: str
+    type: str
+
+
+class CanonicalBirthplace(BaseModel):
+    location_id: str
+    region_code: str
+    timezone: str
+    division_path: list[DivisionPathItem]
 
 
 class BirthInput(BaseModel):
@@ -71,7 +65,7 @@ class BirthInput(BaseModel):
 class NormalizedBirthInput(BaseModel):
     beijing_datetime: datetime
     true_solar_datetime: datetime
-    birthplace: Birthplace
+    birthplace: CanonicalBirthplace
     gender: Gender
 
 

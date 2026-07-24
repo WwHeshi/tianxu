@@ -61,11 +61,17 @@ const LOCATION_PRECISION_LABELS: Record<string, string> = {
   district_center: "区县中心点",
   administrative_center: "行政中心点",
   city_center: "城市行政中心",
+  district_service_point: "区级官方服务点",
+  geographic_area_representative_point: "地理区域代表点",
+  township_area_centroid: "乡镇市区边界质心",
 };
 
 const COORDINATE_MATCH_LABELS: Record<string, string> = {
   direct_code: "正式区划代码",
   official_mca_api: "民政部国家地名信息库",
+  official_had_service_point: "香港民政事务总署",
+  geonames_adm1_direct_id: "GeoNames 澳门地理区域",
+  official_boundary_derived_centroid: "台湾官方区界派生数据",
 };
 
 function readable(value: unknown, fallback = "暂未提供"): string {
@@ -216,10 +222,7 @@ export function BaziWorkbench() {
       return;
     }
 
-    const birthplace: BirthplaceInput = {
-      country_code: "CN",
-      ...resolvedBirthplace,
-    };
+    const birthplace: BirthplaceInput = resolvedBirthplace;
 
     const request: ChartPreviewRequest = {
       beijing_datetime: `${birthDate}T${birthTime}:00`,

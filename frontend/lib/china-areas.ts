@@ -3,50 +3,87 @@ import {
   getTopDivisions,
   isFinalDivision,
 } from "@aurouscia/china-areas";
+import specialRegionOptions from "@/lib/special-region-options.json";
+import type { NormalizedBirthplace } from "@/lib/types";
+
+interface SpecialRegionNode {
+  code: string;
+  name: string;
+  location_id: string | null;
+  children: SpecialRegionNode[];
+}
+
+interface SpecialRegionOptionsSnapshot {
+  schema_version: string;
+  generated_at: string;
+  provinces: SpecialRegionNode[];
+}
 
 export interface ChinaAreaOption {
   code: string;
   name: string;
   isTerminal: boolean;
+  locationId: string | null;
 }
 
 export interface ResolvedChinaBirthplace {
-  province_code: string;
-  province_name: string;
-  city_code: string | null;
-  city_name: string | null;
-  district_code: string;
-  district_name: string;
-}
-
-interface BirthplaceNames {
-  province_name: string;
-  city_name?: string | null;
-  district_name: string;
+  location_id: string;
 }
 
 const EXCLUDED_UNVERIFIED_PROVINCES = new Set(["710000", "810000", "820000"]);
+const SPECIAL_REGIONS = (specialRegionOptions as SpecialRegionOptionsSnapshot).provinces;
 
-function toOption(division: { code: string; name: string }): ChinaAreaOption {
+function toMainlandOption(division: { code: string; name: string }): ChinaAreaOption {
+  const isTerminal = isFinalDivision(division.code);
   return {
     code: division.code,
     name: division.name,
-    isTerminal: isFinalDivision(division.code),
+    isTerminal,
+    locationId: isTerminal ? `CN:${division.code}` : null,
   };
 }
 
-export const CHINA_PROVINCES = getTopDivisions()
-  .filter((division) => !EXCLUDED_UNVERIFIED_PROVINCES.has(division.code))
-  .map(toOption);
+function toSpecialRegionOption(node: SpecialRegionNode): ChinaAreaOption {
+  return {
+    code: node.code,
+    name: node.name,
+    isTerminal: node.location_id !== null,
+    locationId: node.location_id,
+  };
+}
+
+function findSpecialRegionNode(code: string): SpecialRegionNode | null {
+  for (const province of SPECIAL_REGIONS) {
+    if (province.code === code) return province;
+    for (const secondLevel of province.children) {
+      if (secondLevel.code === code) return secondLevel;
+      const district = secondLevel.children.find((item) => item.code === code);
+      if (district) return district;
+    }
+  }
+  return null;
+}
+
+export const CHINA_PROVINCES = [
+  ...getTopDivisions()
+    .filter((division) => !EXCLUDED_UNVERIFIED_PROVINCES.has(division.code))
+    .map(toMainlandOption),
+  ...SPECIAL_REGIONS.map(toSpecialRegionOption),
+];
 
 export function getChinaSecondLevelAreas(provinceCode: string): ChinaAreaOption[] {
   if (!provinceCode) return [];
-  return getDivisionChildren(provinceCode, true).map(toOption);
+  const specialProvince = SPECIAL_REGIONS.find((item) => item.code === provinceCode);
+  if (specialProvince) return specialProvince.children.map(toSpecialRegionOption);
+  return getDivisionChildren(provinceCode, true).map(toMainlandOption);
 }
 
 export function getChinaDistricts(secondLevelCode: string): ChinaAreaOption[] {
-  if (!secondLevelCode || isFinalDivision(secondLevelCode)) return [];
-  return getDivisionChildren(secondLevelCode, true).map(toOption);
+  if (!secondLevelCode) return [];
+  const specialSecondLevel = findSpecialRegionNode(secondLevelCode);
+  if (specialSecondLevel) return specialSecondLevel.children.map(toSpecialRegionOption);
+  if (isFinalDivision(secondLevelCode)) return [];
+  return getDivisionChildren(secondLevelCode, true).map(toMainlandOption);
 }
 
 export function resolveChinaBirthplace(
@@ -60,35 +97,21 @@ export function resolveChinaBirthplace(
   );
   if (!province || !secondLevel) return null;
 
-  if (secondLevel.isTerminal) {
-    return {
-      province_code: province.code,
-      province_name: province.name,
-      city_code: null,
-      city_name: null,
-      district_code: secondLevel.code,
-      district_name: secondLevel.name,
-    };
+  if (secondLevel.isTerminal && secondLevel.locationId) {
+    return { location_id: secondLevel.locationId };
   }
 
   const district = getChinaDistricts(secondLevel.code).find(
     (item) => item.code === districtCode,
   );
-  if (!district) return null;
-
-  return {
-    province_code: province.code,
-    province_name: province.name,
-    city_code: secondLevel.code,
-    city_name: secondLevel.name,
-    district_code: district.code,
-    district_name: district.name,
-  };
+  if (!district?.isTerminal || !district.locationId) return null;
+  return { location_id: district.locationId };
 }
 
-export function formatChinaBirthplace(birthplace?: BirthplaceNames | null): string {
-  if (!birthplace) return "暂未提供";
-  return [birthplace.province_name, birthplace.city_name, birthplace.district_name]
-    .filter((name): name is string => Boolean(name))
-    .join(" · ");
+export function formatChinaBirthplace(
+  birthplace?: Pick<NormalizedBirthplace, "division_path"> | null,
+): string {
+  if (!birthplace || !Array.isArray(birthplace.division_path)) return "暂未提供";
+  const names = birthplace.division_path.map((division) => division.name).filter(Boolean);
+  return names.length > 0 ? names.join(" · ") : "暂未提供";
 }

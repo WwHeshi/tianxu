@@ -17,13 +17,20 @@ export interface ChartPreviewRequest {
 }
 
 export interface BirthplaceInput {
-  country_code: "CN";
-  province_code: string;
-  province_name: string;
-  city_code: string | null;
-  city_name: string | null;
-  district_code: string;
-  district_name: string;
+  location_id: string;
+}
+
+export interface DivisionPathItem {
+  code: string;
+  name: string;
+  type: string;
+}
+
+export interface NormalizedBirthplace {
+  location_id: string;
+  region_code: string;
+  timezone: string;
+  division_path: DivisionPathItem[];
 }
 
 export interface PillarDetail {
@@ -66,7 +73,7 @@ export interface CalculationPolicy {
 export interface NormalizedBirthInfo {
   beijing_datetime: string;
   true_solar_datetime: string;
-  birthplace: BirthplaceInput;
+  birthplace: NormalizedBirthplace;
   gender: Gender | "other";
 }
 

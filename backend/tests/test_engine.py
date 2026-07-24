@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from math import cos, pi, sin
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -7,45 +8,19 @@ from app.bazi import locations
 from app.bazi.engine import ChartCalculationError, calculate_chart
 from app.schemas import BirthInput
 
-GUANGZHOU_TIANHE: dict[str, str | None] = {
-    "country_code": "CN",
-    "province_code": "440000",
-    "province_name": "广东省",
-    "city_code": "440100",
-    "city_name": "广州市",
-    "district_code": "440106",
-    "district_name": "天河区",
-}
-
-URUMQI_TIANSHAN: dict[str, str | None] = {
-    "country_code": "CN",
-    "province_code": "650000",
-    "province_name": "新疆维吾尔自治区",
-    "city_code": "650100",
-    "city_name": "乌鲁木齐市",
-    "district_code": "650102",
-    "district_name": "天山区",
-}
-
-CHONGQING_LIANGJIANG: dict[str, str | None] = {
-    "country_code": "CN",
-    "province_code": "500000",
-    "province_name": "重庆市",
-    "city_code": None,
-    "city_name": None,
-    "district_code": "500157",
-    "district_name": "两江新区",
-}
+GUANGZHOU_TIANHE = "CN:440106"
+URUMQI_TIANSHAN = "CN:650102"
+CHONGQING_LIANGJIANG = "CN:500157"
 
 
 def calculate(
     beijing_datetime: str,
-    birthplace: dict[str, str | None] = GUANGZHOU_TIANHE,
+    birthplace: str = GUANGZHOU_TIANHE,
 ):
     return calculate_chart(
         BirthInput(
             beijing_datetime=beijing_datetime,
-            birthplace=birthplace,
+            birthplace={"location_id": birthplace},
             gender="female",
         )
     )
@@ -98,6 +73,84 @@ def test_official_mca_coordinate_is_used_without_fallback() -> None:
     assert not [warning for warning in result.warnings if "回退" in warning]
 
 
+@pytest.mark.parametrize(
+    ("location_id", "region_code", "timezone", "path_names", "longitude"),
+    [
+        (
+            "CN-HK:DCD:A",
+            "CN-HK",
+            "Asia/Hong_Kong",
+            ["香港特别行政区", "中西区"],
+            114.15491485,
+        ),
+        (
+            "CN-MO:AREA:01",
+            "CN-MO",
+            "Asia/Macau",
+            ["澳门特别行政区", "花地玛堂区"],
+            113.54537,
+        ),
+        (
+            "CN-TW:TOWN:10014020",
+            "CN-TW",
+            "Asia/Taipei",
+            ["台湾地区", "台东县", "成功镇"],
+            121.35410384,
+        ),
+    ],
+)
+def test_special_region_locations_use_beijing_time_and_canonical_metadata(
+    location_id: str,
+    region_code: str,
+    timezone: str,
+    path_names: list[str],
+    longitude: float,
+) -> None:
+    result = calculate("1990-01-01T12:00:00", location_id)
+    normalized_location = result.normalized_input.birthplace
+
+    assert result.normalized_input.beijing_datetime == datetime(1990, 1, 1, 12)
+    assert normalized_location.location_id == location_id
+    assert normalized_location.region_code == region_code
+    assert normalized_location.timezone == timezone
+    assert [item.name for item in normalized_location.division_path] == path_names
+    assert result.solar_time_adjustment.longitude_degrees == pytest.approx(longitude)
+    assert result.solar_time_adjustment.reference_meridian_degrees == 120
+    assert "仅作为元数据，不参与换算" in result.engine.solar_time_note
+    assert not [warning for warning in result.warnings if "回退" in warning]
+
+
+@pytest.mark.parametrize(
+    ("location_id", "timezone"),
+    [
+        ("CN-HK:DCD:A", "Asia/Hong_Kong"),
+        ("CN-MO:AREA:01", "Asia/Macau"),
+        ("CN-TW:TOWN:10014020", "Asia/Taipei"),
+    ],
+)
+def test_historical_local_daylight_saving_time_is_metadata_only(
+    location_id: str,
+    timezone: str,
+) -> None:
+    beijing_clock = datetime(1975, 7, 1, 12)
+    assert beijing_clock.replace(tzinfo=ZoneInfo(timezone)).utcoffset() == timedelta(hours=9)
+
+    result = calculate(beijing_clock.isoformat(), location_id)
+
+    assert result.normalized_input.beijing_datetime == beijing_clock
+    expected_total = 4 * (result.solar_time_adjustment.longitude_degrees - 120) + (
+        noaa_equation_of_time(beijing_clock)
+    )
+    assert result.solar_time_adjustment.total_correction_minutes == pytest.approx(
+        expected_total,
+        abs=1e-6,
+    )
+    expected_true_solar = beijing_clock + timedelta(minutes=expected_total)
+    assert (
+        result.normalized_input.true_solar_datetime - expected_true_solar
+    ).total_seconds() == pytest.approx(0, abs=0.5)
+
+
 def test_true_solar_midnight_boundary_changes_day_and_hour_pillars() -> None:
     before_midnight = calculate("2024-01-02T00:29:00")
     after_midnight = calculate("2024-01-02T00:30:00")
@@ -131,48 +184,35 @@ def test_leap_day_is_supported() -> None:
 
 def test_legacy_statistical_development_zone_is_rejected() -> None:
     with pytest.raises(ChartCalculationError, match=r"暂不支持.*130171"):
-        calculate(
-            "1990-01-01T12:00:00",
-            {
-                "country_code": "CN",
-                "province_code": "130000",
-                "province_name": "河北省",
-                "city_code": "130100",
-                "city_name": "石家庄市",
-                "district_code": "130171",
-                "district_name": "石家庄高新技术产业开发区",
-            },
-        )
+        calculate("1990-01-01T12:00:00", "CN:130171")
 
 
-def test_fallback_coordinate_is_rejected_instead_of_used_for_chart(
+def test_fallback_coordinate_is_a_server_data_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fallback_record = {
-        "province_code": "440000",
-        "province_name": "广东省",
-        "city_code": "440100",
-        "city_name": "广州市",
-        "district_code": "440106",
-        "district_name": "天河区",
-        "longitude": 113.264434,
-        "latitude": 23.129162,
-        "precision": "city_center",
-        "coordinate_match": "regional_center_fallback",
-        "fallback": True,
-        "source_name": "广州市",
-    }
+    fallback_record = locations.LocationRecord(
+        location_id="CN:440106",
+        region_code="CN",
+        timezone="Asia/Shanghai",
+        division_path=(
+            locations.DivisionPathItem("440000", "广东省", "province"),
+            locations.DivisionPathItem("440100", "广州市", "city"),
+            locations.DivisionPathItem("440106", "天河区", "district"),
+        ),
+        longitude=113.264434,
+        latitude=23.129162,
+        precision="city_center",
+        coordinate_match="regional_center_fallback",
+        fallback=True,
+        coordinate_source="test-coordinate-source",
+    )
     monkeypatch.setattr(
         locations,
-        "_load_coordinate_data",
-        lambda: {
-            "standard_meridian_longitude": 120,
-            "coordinate_source": "test-coordinate-source",
-            "records": {"440106": fallback_record},
-        },
+        "_load_location_data",
+        lambda: {"CN:440106": fallback_record},
     )
 
-    with pytest.raises(ChartCalculationError, match=r"回退|缺少独立.*坐标"):
+    with pytest.raises(locations.LocationDataError, match=r"回退|缺少独立.*坐标"):
         calculate("1990-01-01T12:00:00")
 
 
