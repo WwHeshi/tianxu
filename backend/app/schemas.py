@@ -144,12 +144,30 @@ class BranchComponent(BaseModel):
     hidden_stems: list[HiddenStem]
 
 
+class ChartCalendar(BaseModel):
+    """Calendar labels derived from the exact datetime used for the pillars."""
+
+    solar_datetime: datetime
+    lunar_year: int
+    lunar_month: int
+    lunar_day: int
+    is_leap_month: bool
+    lunar_text: str
+    time_branch: str
+    zodiac: str
+    destiny_type: Literal["乾造", "坤造", "命造"]
+
+
 class Pillar(BaseModel):
     name: Literal["year", "month", "day", "hour"]
     gan_zhi: str
     heavenly_stem: Component
     earthly_branch: BranchComponent
+    growth_stage: str
+    self_growth_stage: str
+    xun_kong: str
     na_yin: str
+    shen_sha: list[str]
 
 
 class ElementDistribution(BaseModel):
@@ -168,6 +186,7 @@ class Pillars(BaseModel):
 
 
 class Chart(BaseModel):
+    calendar: ChartCalendar
     pillars: Pillars
     day_master: Component
     element_distribution: ElementDistribution
@@ -177,6 +196,7 @@ class EngineInfo(BaseModel):
     name: str
     version: str
     policy_version: str
+    shen_sha_policy_version: str
     solar_time_note: str
 
 

@@ -118,6 +118,20 @@ async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient
     assert datetime.fromisoformat(
         data["normalized_input"]["true_solar_datetime"]
     ) < datetime.fromisoformat(data["normalized_input"]["beijing_datetime"])
+    assert data["chart"]["calendar"]["solar_datetime"] == data["normalized_input"][
+        "true_solar_datetime"
+    ]
+    assert data["chart"]["calendar"]["destiny_type"] == "乾造"
+    assert data["chart"]["calendar"]["lunar_text"]
+    for pillar in pillars.values():
+        assert {
+            "growth_stage",
+            "self_growth_stage",
+            "xun_kong",
+            "na_yin",
+            "shen_sha",
+        } <= pillar.keys()
+    assert data["engine"]["shen_sha_policy_version"] == "v2"
     assert data["engine"]["solar_time_note"]
 
 

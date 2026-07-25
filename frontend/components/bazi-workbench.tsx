@@ -31,7 +31,6 @@ import {
 } from "@/lib/china-areas";
 import type {
   BirthplaceInput,
-  CalculationPolicy,
   ChartPreview,
   ChartPreviewRequest,
   Gender,
@@ -53,14 +52,6 @@ const DEFAULT_POLICY = {
   day_boundary: "midnight" as const,
   time_basis: "beijing_standard_time" as const,
   true_solar_time: true as const,
-};
-
-const POLICY_LABELS: Record<string, string> = {
-  v1: "规则 v1",
-  lichun: "立春分年",
-  solar_terms: "节气分月",
-  midnight: "真太阳时 00:00 换日",
-  beijing_standard_time: "北京时间",
 };
 
 function readable(value: unknown, fallback = "暂未提供"): string {
@@ -93,20 +84,6 @@ function getPillar(chart: ChartPreview, key: PillarKey, index: number): Partial<
     return record[key] ?? record[`${key}_pillar`] ?? {};
   }
   return {};
-}
-
-function getEngineVersion(engine: ChartPreview["engine"]): string {
-  if (engine && typeof engine === "object") {
-    return [engine.name, engine.version].filter(Boolean).join(" · ") || "已记录";
-  }
-  return "已记录";
-}
-
-function policyValue(policy: CalculationPolicy | undefined, key: keyof CalculationPolicy): string {
-  const value = policy?.[key];
-  if (typeof value === "boolean") return value ? "开启" : "关闭";
-  const text = readable(value, "未说明");
-  return POLICY_LABELS[text] ?? text;
 }
 
 function formatDistributionValue(value: unknown): string {
@@ -480,47 +457,158 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 
 function ChartResult({ chart }: { chart: ChartPreview }) {
   const distribution = chart.chart?.element_distribution?.total ?? {};
-  const policy = chart.calculation_policy ?? {};
+  const calendar = chart.chart?.calendar;
   const normalized = chart.normalized_input ?? {};
-  const limitations = Array.isArray(chart.limitations) ? chart.limitations : [];
   const warnings = Array.isArray(chart.warnings) ? chart.warnings : [];
   const maxElementCount = Math.max(1, ...Object.values(distribution));
   const birthplace = normalized.birthplace
     ? formatChinaBirthplace(normalized.birthplace)
     : "未选择（按北京时间）";
-  const usesTrueSolarTime = policy.true_solar_time !== false;
+  const usesTrueSolarTime = chart.calculation_policy?.true_solar_time !== false;
+  const genderLabel = normalized.gender === "female" ? "女" : normalized.gender === "male" ? "男" : "其他";
+  const dayMasterLabel = normalized.gender === "female" ? "元女" : normalized.gender === "male" ? "元男" : "日主";
+  const pillars = PILLARS.map((definition, index) => ({
+    ...definition,
+    pillar: getPillar(chart, definition.key, index),
+  }));
 
   return (
     <div className="chart-content">
+      <section className="chart-calendar-card" aria-label="命盘日期摘要">
+        <div className="zodiac-badge">
+          <span>生肖</span>
+          <strong>{readable(calendar?.zodiac)}</strong>
+        </div>
+        <dl className="calendar-summary-lines">
+          <div>
+            <dt>农历</dt>
+            <dd>{readable(calendar?.lunar_text)} {readable(calendar?.time_branch)}时 · {readable(calendar?.destiny_type)}</dd>
+          </div>
+          <div>
+            <dt>公历</dt>
+            <dd>{formatDateTime(calendar?.solar_datetime)}</dd>
+          </div>
+        </dl>
+      </section>
+
       <div className="meta-strip">
         <div><span>北京时间</span><strong>{formatDateTime(normalized.beijing_datetime)}</strong></div>
         <div><span>{usesTrueSolarTime ? "真太阳时" : "排盘时间"}</span><strong>{formatDateTime(normalized.true_solar_datetime)}</strong></div>
         <div><span>出生地点</span><strong className="meta-value-wrap">{birthplace}</strong></div>
-        <div><span>性别</span><strong>{normalized.gender === "female" ? "女" : "男"}</strong></div>
+        <div><span>性别</span><strong>{genderLabel}</strong></div>
       </div>
 
       <section className="chart-section" aria-labelledby="pillars-title">
         <div className="section-heading"><h3 id="pillars-title">四柱</h3><span>日主 {readable(chart.chart?.day_master)}</span></div>
-        <div className="pillars-grid">
-          {PILLARS.map(({ key, label, description }, index) => {
-            const pillar = getPillar(chart, key, index);
-            const stem = readable(pillar.heavenly_stem, "—");
-            const branch = readable(pillar.earthly_branch, "—");
-            const hidden = Array.isArray(pillar.earthly_branch?.hidden_stems)
-              ? pillar.earthly_branch.hidden_stems.map((item) => readable(item, "")).filter(Boolean).join(" · ")
-              : "暂未提供";
-            const tenGod = readable(pillar.heavenly_stem?.ten_god, "");
-            return (
-              <article className="pillar" key={key}>
-                <div className="pillar-topline"><span className="pillar-label">{label}</span><span>{description}</span></div>
-                <div className="pillar-glyphs"><span>{stem}</span><span>{branch}</span></div>
-                <div className="pillar-rule" />
-                <div className="pillar-detail"><span>藏干</span><strong>{hidden}</strong></div>
-                {tenGod && <div className="pillar-detail"><span>十神</span><strong>{tenGod}</strong></div>}
-                {pillar.na_yin && <div className="pillar-detail"><span>纳音</span><strong>{readable(pillar.na_yin)}</strong></div>}
-              </article>
-            );
-          })}
+        <div className="pillar-table-wrap">
+          <table className="pillar-table">
+            <thead>
+              <tr>
+                <th className="pillar-row-label" scope="col">日期</th>
+                {pillars.map(({ key, label, description }) => (
+                  <th key={key} scope="col" title={description}>{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th className="pillar-row-label" scope="row">主星</th>
+                {pillars.map(({ key, pillar }) => (
+                  <td className="primary-star" key={key}>
+                    {key === "day" ? dayMasterLabel : readable(pillar.heavenly_stem?.ten_god, "—")}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">天干</th>
+                {pillars.map(({ key, pillar }) => (
+                  <td key={key}>
+                    <strong className="pillar-symbol" data-element={pillar.heavenly_stem?.element}>
+                      {readable(pillar.heavenly_stem, "—")}
+                    </strong>
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">地支</th>
+                {pillars.map(({ key, pillar }) => (
+                  <td key={key}>
+                    <strong className="pillar-symbol" data-element={pillar.earthly_branch?.element}>
+                      {readable(pillar.earthly_branch, "—")}
+                    </strong>
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">藏干</th>
+                {pillars.map(({ key, pillar }) => {
+                  const hiddenStems = Array.isArray(pillar.earthly_branch?.hidden_stems)
+                    ? pillar.earthly_branch.hidden_stems
+                    : [];
+                  return (
+                    <td key={key}>
+                      <div className="pillar-cell-stack">
+                        {hiddenStems.length > 0 ? hiddenStems.map((item, hiddenIndex) => (
+                          <span className="hidden-stem" key={`${item.symbol}-${hiddenIndex}`}>
+                            <strong data-element={item.element}>{item.symbol}</strong>
+                            <small>{item.element}</small>
+                          </span>
+                        )) : <span>—</span>}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">副星</th>
+                {pillars.map(({ key, pillar }) => {
+                  const hiddenStems = Array.isArray(pillar.earthly_branch?.hidden_stems)
+                    ? pillar.earthly_branch.hidden_stems
+                    : [];
+                  return (
+                    <td key={key}>
+                      <div className="pillar-cell-stack">
+                        {hiddenStems.length > 0 ? hiddenStems.map((item, hiddenIndex) => (
+                          <span key={`${item.symbol}-${hiddenIndex}`}>{readable(item.ten_god, "—")}</span>
+                        )) : <span>—</span>}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">星运</th>
+                {pillars.map(({ key, pillar }) => <td key={key}>{readable(pillar.growth_stage, "—")}</td>)}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">自坐</th>
+                {pillars.map(({ key, pillar }) => <td key={key}>{readable(pillar.self_growth_stage, "—")}</td>)}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">空亡</th>
+                {pillars.map(({ key, pillar }) => <td key={key}>{readable(pillar.xun_kong, "—")}</td>)}
+              </tr>
+              <tr>
+                <th className="pillar-row-label" scope="row">纳音</th>
+                {pillars.map(({ key, pillar }) => <td key={key}>{readable(pillar.na_yin, "—")}</td>)}
+              </tr>
+              <tr className="shen-sha-row">
+                <th className="pillar-row-label" scope="row">神煞</th>
+                {pillars.map(({ key, pillar }) => {
+                  const shenSha = Array.isArray(pillar.shen_sha) ? pillar.shen_sha : [];
+                  return (
+                    <td key={key}>
+                      <div className="pillar-cell-stack">
+                        {shenSha.length > 0
+                          ? shenSha.map((item) => <span key={item}>{item}</span>)
+                          : <span>—</span>}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -540,17 +628,6 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
           ) : <p className="muted-copy">后端暂未返回五行统计。</p>}
         </section>
 
-        <section className="detail-section" aria-labelledby="policy-title">
-          <div className="section-heading"><h3 id="policy-title">计算口径</h3><span>本次排盘记录</span></div>
-          <dl className="policy-list">
-            <div><dt>年份边界</dt><dd>{policyValue(policy, "year_boundary")}</dd></div>
-            <div><dt>月份边界</dt><dd>{policyValue(policy, "month_boundary")}</dd></div>
-            <div><dt>换日方式</dt><dd>{policyValue(policy, "day_boundary")}</dd></div>
-            <div><dt>时间基准</dt><dd>{policyValue(policy, "time_basis")}</dd></div>
-            <div><dt>真太阳时</dt><dd>{policyValue(policy, "true_solar_time")}</dd></div>
-            <div><dt>引擎版本</dt><dd>{getEngineVersion(chart.engine)}</dd></div>
-          </dl>
-        </section>
       </div>
 
       {warnings.length > 0 && (
@@ -560,12 +637,6 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
         </aside>
       )}
 
-      {limitations.length > 0 && (
-        <aside className="limitations" aria-label="结果说明">
-          <Info size={16} aria-hidden="true" />
-          <div><strong>结果说明</strong><ul>{limitations.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></div>
-        </aside>
-      )}
     </div>
   );
 }

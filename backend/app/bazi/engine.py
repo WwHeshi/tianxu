@@ -18,6 +18,7 @@ from ..schemas import (
     BranchComponent,
     CanonicalBirthplace,
     Chart,
+    ChartCalendar,
     ChartPreviewResponse,
     Component,
     DivisionPathItem,
@@ -30,6 +31,7 @@ from ..schemas import (
     SolarTimeAdjustment,
 )
 from .locations import BirthplaceCoordinateError, LocationDataError, get_location
+from .shen_sha import SHEN_SHA_POLICY_VERSION, calculate_shen_sha
 
 
 class ChartCalculationError(RuntimeError):
@@ -50,6 +52,19 @@ ZHI_ELEMENT = dict(LunarUtil.WU_XING_ZHI)
 HIDDEN_GAN = dict(LunarUtil.ZHI_HIDE_GAN)
 NAYIN = dict(LunarUtil.NAYIN)
 SHI_SHEN = dict(LunarUtil.SHI_SHEN)
+GROWTH_STAGES = ("长生", "沐浴", "冠带", "临官", "帝旺", "衰", "病", "死", "墓", "绝", "胎", "养")
+GROWTH_STAGE_OFFSETS = {
+    "甲": 1,
+    "丙": 10,
+    "戊": 10,
+    "庚": 7,
+    "壬": 4,
+    "乙": 6,
+    "丁": 9,
+    "己": 9,
+    "辛": 0,
+    "癸": 3,
+}
 
 # Heavenly stems alternate yang/yin, beginning with 甲; earthly branches do the
 # same, beginning with 子.  Keeping this local avoids exposing LunarUtil internals.
@@ -68,8 +83,9 @@ LIMITATIONS = [
     "提供出生地点时使用真太阳时；未提供地点时使用北京时间。规则 v1 均在所选时间基准的 00:00 换日。",
     "接近换日、时辰或节气边界时，应复核出生时间；真太阳时模式还应结合具体地址复核。",
     "均时差使用 NOAA 近似公式，节气表由排盘库提供，边界样例仍需独立历书交叉校验。",
-    "性别当前仅用于记录，v1 尚未计算大运、起运和流年。",
+    "性别用于乾造、坤造标签及元辰规则，v1 尚未计算大运、起运和流年。",
     "五行分布是不加权计数，不代表旺衰或强弱评分。",
+    "神煞采用天序固定 51 项规则集 v2；不同流派的神煞取法和名称可能存在差异。",
 ]
 
 
@@ -249,7 +265,20 @@ def _branch(symbol: str, day_master: str) -> BranchComponent:
     )
 
 
-def _pillar(name: str, gan_zhi: str, day_master: str) -> Pillar:
+def _growth_stage(stem: str, branch: str) -> str:
+    try:
+        stem_index = GAN.index(stem)
+        branch_index = ZHI.index(branch)
+        offset = GROWTH_STAGE_OFFSETS[stem]
+    except (KeyError, ValueError) as exc:  # pragma: no cover - upstream invariant
+        raise ChartCalculationError(
+            f"cannot calculate growth stage for stem {stem!r} and branch {branch!r}"
+        ) from exc
+    direction = 1 if stem_index % 2 == 0 else -1
+    return GROWTH_STAGES[(offset + direction * branch_index) % len(GROWTH_STAGES)]
+
+
+def _pillar(name: str, gan_zhi: str, day_master: str, shen_sha: list[str]) -> Pillar:
     if len(gan_zhi) != 2:
         raise ChartCalculationError(f"invalid pillar returned by lunar-python: {gan_zhi!r}")
     gan, zhi = gan_zhi
@@ -261,7 +290,11 @@ def _pillar(name: str, gan_zhi: str, day_master: str) -> Pillar:
             ten_god="日主" if name == "day" else SHI_SHEN.get(day_master + gan),
         ),
         earthly_branch=_branch(zhi, day_master),
+        growth_stage=_growth_stage(day_master, zhi),
+        self_growth_stage=_growth_stage(gan, zhi),
+        xun_kong=LunarUtil.getXunKong(gan_zhi),
         na_yin=NAYIN.get(gan_zhi, "未知"),
+        shen_sha=shen_sha,
     )
 
 
@@ -282,7 +315,8 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
             true_solar.minute,
             true_solar.second,
         )
-        eight_char = solar.getLunar().getEightChar()
+        lunar = solar.getLunar()
+        eight_char = lunar.getEightChar()
         # Sect 2 is the library's midnight rollover convention (our v1 policy).
         eight_char.setSect(2)
         raw_pillars = {
@@ -302,8 +336,32 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
         raise ChartCalculationError("lunar-python could not calculate this date") from exc
 
     day_master = raw_pillars["day"][0]
-    pillar_map = {name: _pillar(name, value, day_master) for name, value in raw_pillars.items()}
+    shen_sha = calculate_shen_sha(raw_pillars, gender=birth.gender.value)
+    pillar_map = {
+        name: _pillar(name, value, day_master, shen_sha[name])
+        for name, value in raw_pillars.items()
+    }
     pillars = Pillars(**pillar_map)  # type: ignore[arg-type]
+
+    lunar_month = lunar.getMonth()
+    destiny_type = {
+        "male": "乾造",
+        "female": "坤造",
+        "other": "命造",
+    }[birth.gender.value]
+    calendar = ChartCalendar(
+        solar_datetime=true_solar,
+        lunar_year=lunar.getYear(),
+        lunar_month=abs(lunar_month),
+        lunar_day=lunar.getDay(),
+        is_leap_month=lunar_month < 0,
+        lunar_text=(
+            f"{lunar.getYear()}年{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
+        ),
+        time_branch=raw_pillars["hour"][1],
+        zodiac=lunar.getYearShengXiaoExact(),
+        destiny_type=destiny_type,  # type: ignore[arg-type]
+    )
 
     visible = _element_counts()
     hidden_counts = _element_counts()
@@ -317,6 +375,7 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
     return ChartPreviewResponse(
         normalized_input=normalized,
         chart=Chart(
+            calendar=calendar,
             pillars=pillars,
             day_master=_component(day_master, ten_god="日主"),
             element_distribution=ElementDistribution(
@@ -331,6 +390,7 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
             name=ENGINE_NAME,
             version=ENGINE_VERSION,
             policy_version=birth.calculation_policy.version,
+            shen_sha_policy_version=SHEN_SHA_POLICY_VERSION,
             solar_time_note=(
                 SOLAR_TIME_NOTE if solar_time_adjustment is not None else BEIJING_TIME_NOTE
             ),

@@ -47,7 +47,11 @@ export interface PillarDetail {
   gan_zhi: string;
   heavenly_stem: ComponentDetail;
   earthly_branch: BranchDetail;
+  growth_stage: string;
+  self_growth_stage: string;
+  xun_kong: string;
   na_yin: string;
+  shen_sha: string[];
 }
 
 export type PillarKey = "year" | "month" | "day" | "hour";
@@ -67,6 +71,18 @@ export interface ElementDistribution {
   visible: Record<string, number>;
   hidden_stems: Record<string, number>;
   total: Record<string, number>;
+}
+
+export interface ChartCalendarDetail {
+  solar_datetime: string;
+  lunar_year: number;
+  lunar_month: number;
+  lunar_day: number;
+  is_leap_month: boolean;
+  lunar_text: string;
+  time_branch: string;
+  zodiac: string;
+  destiny_type: "乾造" | "坤造" | "命造";
 }
 
 export interface CalculationPolicy {
@@ -103,6 +119,7 @@ export interface SolarTimeAdjustment {
 export interface ChartPreview {
   normalized_input: NormalizedBirthInfo;
   chart: {
+    calendar: ChartCalendarDetail;
     pillars: Record<PillarKey, PillarDetail>;
     day_master: ComponentDetail;
     element_distribution: ElementDistribution;
@@ -113,6 +130,7 @@ export interface ChartPreview {
     name: string;
     version: string;
     policy_version: string;
+    shen_sha_policy_version: string;
     solar_time_note: string;
   };
   warnings: string[];
