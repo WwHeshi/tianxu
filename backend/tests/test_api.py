@@ -131,7 +131,33 @@ async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient
             "na_yin",
             "shen_sha",
         } <= pillar.keys()
+    fortune_cycles = data["chart"]["fortune_cycles"]
+    assert fortune_cycles["policy_version"] == "v1"
+    assert fortune_cycles["direction"] == "backward"
+    assert len(fortune_cycles["big_luck_periods"]) == 10
+    period = fortune_cycles["big_luck_periods"][1]
+    assert {"start_solar_datetime", "end_solar_datetime"} <= period.keys()
+    assert len(period["years"]) == 11
+    annual = period["years"][0]
+    assert {
+        "segment_start_solar_datetime",
+        "segment_end_solar_datetime",
+        "big_luck_index_at_start",
+        "big_luck_gan_zhi_at_start",
+        "transition_phase",
+        "transition",
+    } <= annual.keys()
+    assert 1 <= len(annual["months"]) <= 12
+    assert {
+        "segment_start_solar_datetime",
+        "segment_end_solar_datetime",
+        "big_luck_index_at_start",
+        "big_luck_gan_zhi_at_start",
+        "transition_phase",
+        "transition",
+    } <= annual["months"][0].keys()
     assert data["engine"]["shen_sha_policy_version"] == "v2"
+    assert data["engine"]["fortune_policy_version"] == "v1"
     assert data["engine"]["solar_time_note"]
 
 

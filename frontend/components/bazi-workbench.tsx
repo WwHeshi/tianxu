@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { previewChart } from "@/lib/api";
 import { DateWheelPicker, TimeWheelPicker } from "@/components/date-wheel-picker";
 import {
@@ -31,9 +31,14 @@ import {
 } from "@/lib/china-areas";
 import type {
   BirthplaceInput,
+  AnnualFortuneDetail,
+  BigLuckPeriodDetail,
   ChartPreview,
   ChartPreviewRequest,
+  FortuneCyclesDetail,
+  FortunePillarDetail,
   Gender,
+  MonthlyFortuneDetail,
   PillarDetail,
   PillarKey,
 } from "@/lib/types";
@@ -86,21 +91,15 @@ function getPillar(chart: ChartPreview, key: PillarKey, index: number): Partial<
   return {};
 }
 
-function formatDistributionValue(value: unknown): string {
-  if (typeof value === "number") return `${value}`;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const count = record.count ?? record.value ?? record.weight;
-    if (typeof count === "number") return `${count}`;
-  }
-  return readable(value, "0");
-}
-
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function todayString(): string {
   const beijingNow = new Date(Date.now() + BEIJING_OFFSET_MS);
   return beijingNow.toISOString().slice(0, 10);
+}
+
+function beijingNowString(): string {
+  return new Date(Date.now() + BEIJING_OFFSET_MS).toISOString().slice(0, 19);
 }
 
 function millisecondsUntilNextBeijingDay(): number {
@@ -455,12 +454,345 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
+function shortMonthDay(value: string): string {
+  const match = value.match(/^\d{4}-(\d{2})-(\d{2})/);
+  return match ? `${Number(match[1])}/${Number(match[2])}` : "—";
+}
+
+function transitionPhaseLabel(phase: "before" | "after" | null): string | null {
+  if (phase === "before") return "交运前";
+  if (phase === "after") return "交运后";
+  return null;
+}
+
+function bigLuckName(ganZhi: string | null): string {
+  return ganZhi ? `${ganZhi}大运` : "起运前";
+}
+
+function FortunePillarCell({ pillar }: { pillar: FortunePillarDetail }) {
+  return (
+    <div className="fortune-pillar">
+      <span>
+        <strong data-element={pillar.heavenly_stem.element}>{pillar.heavenly_stem.symbol}</strong>
+        <small>{readable(pillar.heavenly_stem.ten_god, "—")}</small>
+      </span>
+      <span>
+        <strong data-element={pillar.earthly_branch.element}>{pillar.earthly_branch.symbol}</strong>
+        <small>{readable(pillar.earthly_branch.ten_god, "—")}</small>
+      </span>
+    </div>
+  );
+}
+
+function useHorizontalScroller(selection: string | number) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const scroller = ref.current;
+    const selected = scroller?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (!scroller || !selected) return;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const selectedRect = selected.getBoundingClientRect();
+    const selectedCenter = (
+      selectedRect.left
+      - scrollerRect.left
+      + scroller.scrollLeft
+      + selectedRect.width / 2
+    );
+    const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+    const target = Math.min(maxScrollLeft, Math.max(0, selectedCenter - scroller.clientWidth / 2));
+    scroller.scrollTo({ left: target, behavior: "smooth" });
+  }, [selection]);
+
+  useEffect(() => {
+    const scrollElement = ref.current;
+    if (!scrollElement) return;
+    const scroller: HTMLDivElement = scrollElement;
+
+    let pointerId: number | null = null;
+    let startX = 0;
+    let startScrollLeft = 0;
+    let dragged = false;
+    let suppressClick = false;
+    let suppressClickTimer: number | null = null;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.button !== 0
+        || pointerId !== null
+        || scroller.scrollWidth <= scroller.clientWidth
+      ) return;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startScrollLeft = scroller.scrollLeft;
+      dragged = false;
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      if (event.pointerId !== pointerId) return;
+      const distance = event.clientX - startX;
+      if (!dragged && Math.abs(distance) < 4) return;
+      dragged = true;
+      scroller.dataset.dragging = "true";
+      scroller.scrollLeft = startScrollLeft - distance;
+      event.preventDefault();
+    }
+
+    function finishPointer(event: PointerEvent, shouldSuppressClick: boolean) {
+      if (event.pointerId !== pointerId) return;
+      pointerId = null;
+      suppressClick = shouldSuppressClick && dragged;
+      dragged = false;
+      delete scroller.dataset.dragging;
+      if (suppressClick) {
+        if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer);
+        suppressClickTimer = window.setTimeout(() => {
+          suppressClick = false;
+          suppressClickTimer = null;
+        }, 0);
+      }
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      finishPointer(event, true);
+    }
+
+    function handlePointerCancel(event: PointerEvent) {
+      finishPointer(event, false);
+    }
+
+    function handleClick(event: MouseEvent) {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    function handleWheel(event: WheelEvent) {
+      if (
+        Math.abs(event.deltaY) <= Math.abs(event.deltaX)
+        || scroller.scrollWidth <= scroller.clientWidth
+      ) return;
+      const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth;
+      const nextScrollLeft = Math.min(
+        maxScrollLeft,
+        Math.max(0, scroller.scrollLeft + event.deltaY),
+      );
+      if (nextScrollLeft === scroller.scrollLeft) return;
+      event.preventDefault();
+      scroller.scrollLeft = nextScrollLeft;
+    }
+
+    scroller.addEventListener("pointerdown", handlePointerDown);
+    scroller.addEventListener("click", handleClick, true);
+    scroller.addEventListener("wheel", handleWheel, { passive: false });
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    return () => {
+      if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer);
+      scroller.removeEventListener("pointerdown", handlePointerDown);
+      scroller.removeEventListener("click", handleClick, true);
+      scroller.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  }, []);
+
+  return ref;
+}
+
+interface InitialFortuneSelection {
+  periodIndex: number;
+  year: number;
+  monthIndex: number;
+  currentPeriodIndex: number;
+  currentYear: number;
+  currentMonthIndex: number;
+}
+
+function initialFortuneSelection(cycles: FortuneCyclesDetail): InitialFortuneSelection {
+  const now = beijingNowString();
+  const periods = cycles.big_luck_periods;
+  const actualCurrentPeriod = periods.find(
+    (period) => now >= period.start_solar_datetime && now < period.end_solar_datetime,
+  ) ?? (now < (periods[0]?.start_solar_datetime ?? now) ? periods[0] : periods.at(-1));
+  const activeAnnual = actualCurrentPeriod?.years.find(
+    (annual) => now >= annual.segment_start_solar_datetime && now < annual.segment_end_solar_datetime,
+  ) ?? (now < (actualCurrentPeriod?.years[0]?.segment_start_solar_datetime ?? now)
+    ? actualCurrentPeriod?.years[0]
+    : actualCurrentPeriod?.years.at(-1));
+  const activeMonth =
+    activeAnnual?.months.find(
+      (month) => now >= month.segment_start_solar_datetime && now < month.segment_end_solar_datetime,
+    )
+    ?? activeAnnual?.months[0];
+
+  return {
+    periodIndex: actualCurrentPeriod?.index ?? 0,
+    year: activeAnnual?.year ?? periods[0]?.start_year ?? new Date().getFullYear(),
+    monthIndex: activeMonth?.index ?? 1,
+    currentPeriodIndex: actualCurrentPeriod?.index ?? 0,
+    currentYear: activeAnnual?.year ?? periods[0]?.start_year ?? new Date().getFullYear(),
+    currentMonthIndex: activeMonth?.index ?? 1,
+  };
+}
+
+function FortuneSelector({ cycles }: { cycles: FortuneCyclesDetail }) {
+  const initial = useMemo(() => initialFortuneSelection(cycles), [cycles]);
+  const [periodIndex, setPeriodIndex] = useState(initial.periodIndex);
+  const [selectedYear, setSelectedYear] = useState(initial.year);
+  const [monthIndex, setMonthIndex] = useState(initial.monthIndex);
+  const period = cycles.big_luck_periods.find((item) => item.index === periodIndex)
+    ?? cycles.big_luck_periods[0];
+  const annual = period?.years.find((item) => item.year === selectedYear) ?? period?.years[0];
+  const month = annual?.months.find((item) => item.index === monthIndex) ?? annual?.months[0];
+  const bigLuckScrollRef = useHorizontalScroller(periodIndex);
+  const annualScrollRef = useHorizontalScroller(selectedYear);
+  const monthScrollRef = useHorizontalScroller(monthIndex);
+  const offset = cycles.start_offset;
+
+  function selectPeriod(nextPeriod: BigLuckPeriodDetail) {
+    setPeriodIndex(nextPeriod.index);
+    const nextAnnual = nextPeriod.years.find((item) => item.year === selectedYear)
+      ?? nextPeriod.years.find((item) => item.year === initial.currentYear)
+      ?? nextPeriod.years[0];
+    if (!nextAnnual) return;
+    setSelectedYear(nextAnnual.year);
+    const nextMonth = nextAnnual.months.find((item) => item.index === monthIndex)
+      ?? (nextAnnual.year === initial.currentYear
+        ? nextAnnual.months.find((item) => item.index === initial.currentMonthIndex)
+        : undefined)
+      ?? nextAnnual.months[0];
+    setMonthIndex(nextMonth?.index ?? 1);
+  }
+
+  function selectAnnual(nextAnnual: AnnualFortuneDetail) {
+    setSelectedYear(nextAnnual.year);
+    const nextMonth = nextAnnual.year === initial.currentYear
+      ? nextAnnual.months.find((item) => item.index === initial.currentMonthIndex)
+      : nextAnnual.months[0];
+    setMonthIndex(nextMonth?.index ?? 1);
+  }
+
+  if (!period || !annual || !month) return null;
+  const selectedTransition = month.transition;
+  const selectedTransitionPhase = transitionPhaseLabel(month.transition_phase);
+
+  return (
+    <section className="fortune-section" aria-labelledby="fortune-title">
+      <div className="section-heading">
+        <h3 id="fortune-title">运势周期</h3>
+        <span>大运 · 流年 · 流月</span>
+      </div>
+      <div className="fortune-summary">
+        <span>起运：出生后 {offset.years} 年 {offset.months} 月 {offset.days} 天 {offset.hours} 小时</span>
+        <span>交运：{formatDateTime(cycles.start_solar_datetime)}</span>
+        <span>年龄：虚岁</span>
+        <strong>{cycles.direction === "forward" ? "顺行" : "逆行"}</strong>
+      </div>
+      <div className={`fortune-boundary-summary ${selectedTransitionPhase ? "is-transition" : ""}`}>
+        <strong>{selectedTransitionPhase ?? "所处大运"}</strong>
+        {selectedTransition ? (
+          <span>
+            {bigLuckName(selectedTransition.from_gan_zhi)} → {bigLuckName(selectedTransition.to_gan_zhi)}
+            <small>{formatDateTime(selectedTransition.solar_datetime)} 交运</small>
+          </span>
+        ) : (
+          <span>{bigLuckName(month.big_luck_gan_zhi_at_start)}</span>
+        )}
+      </div>
+
+      <div className="fortune-row">
+        <div className="fortune-row-label" aria-hidden="true"><span>大</span><span>运</span></div>
+        <div className="fortune-scroll" ref={bigLuckScrollRef} role="group" aria-label="选择大运">
+          {cycles.big_luck_periods.map((item) => {
+            const selected = item.index === period.index;
+            const current = item.index === initial.currentPeriodIndex;
+            return (
+              <button
+                className="fortune-cell fortune-big-cell"
+                data-current={current || undefined}
+                aria-pressed={selected}
+                type="button"
+                key={item.index}
+                title={item.is_before_start ? "出生至首次交运" : `${formatDateTime(item.start_solar_datetime)} 交运`}
+                onClick={() => selectPeriod(item)}
+              >
+                <span className="fortune-cell-year">{item.start_year}</span>
+                <small>{item.is_before_start ? `${item.start_nominal_age}~${item.end_nominal_age}岁` : `${item.start_nominal_age}岁`}</small>
+                {item.pillar ? <FortunePillarCell pillar={item.pillar} /> : <strong className="before-luck-label">起运前</strong>}
+                {current && <i className="fortune-current-dot" aria-label="当前大运" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="fortune-row">
+        <div className="fortune-row-label" aria-hidden="true"><span>流</span><span>年</span></div>
+        <div className="fortune-scroll" ref={annualScrollRef} role="group" aria-label="选择流年">
+          {period.years.map((item) => {
+            const selected = item.year === annual.year;
+            const current = period.index === initial.currentPeriodIndex && item.year === initial.currentYear;
+            const phaseLabel = transitionPhaseLabel(item.transition_phase);
+            return (
+              <button
+                className="fortune-cell"
+                data-current={current || undefined}
+                aria-pressed={selected}
+                type="button"
+                key={item.year}
+                onClick={() => selectAnnual(item)}
+              >
+                <span className="fortune-cell-year">{item.year}</span>
+                <small>{item.nominal_age}岁</small>
+                <FortunePillarCell pillar={item.pillar} />
+                {phaseLabel && <em className="fortune-transition-badge">{phaseLabel}</em>}
+                {current && <i className="fortune-current-dot" aria-label="当前流年" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="fortune-row">
+        <div className="fortune-row-label" aria-hidden="true"><span>流</span><span>月</span></div>
+        <div className="fortune-scroll" ref={monthScrollRef} role="group" aria-label="选择流月">
+          {annual.months.map((item: MonthlyFortuneDetail) => {
+            const selected = item.index === month.index;
+            const current = period.index === initial.currentPeriodIndex
+              && annual.year === initial.currentYear
+              && item.index === initial.currentMonthIndex;
+            const phaseLabel = transitionPhaseLabel(item.transition_phase);
+            return (
+              <button
+                className="fortune-cell"
+                data-current={current || undefined}
+                aria-pressed={selected}
+                type="button"
+                key={item.index}
+                onClick={() => setMonthIndex(item.index)}
+              >
+                <span className="fortune-cell-year">{item.solar_term}</span>
+                <small>{shortMonthDay(item.start_solar_datetime)}</small>
+                <FortunePillarCell pillar={item.pillar} />
+                {phaseLabel && <em className="fortune-transition-badge">{phaseLabel}</em>}
+                {current && <i className="fortune-current-dot" aria-label="当前流月" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ChartResult({ chart }: { chart: ChartPreview }) {
-  const distribution = chart.chart?.element_distribution?.total ?? {};
   const calendar = chart.chart?.calendar;
   const normalized = chart.normalized_input ?? {};
   const warnings = Array.isArray(chart.warnings) ? chart.warnings : [];
-  const maxElementCount = Math.max(1, ...Object.values(distribution));
   const birthplace = normalized.birthplace
     ? formatChinaBirthplace(normalized.birthplace)
     : "未选择（按北京时间）";
@@ -612,23 +944,12 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
         </div>
       </section>
 
-      <div className="detail-grid">
-        <section className="detail-section" aria-labelledby="elements-title">
-          <div className="section-heading"><h3 id="elements-title">五行分布</h3><span>命盘基础信息</span></div>
-          {Object.keys(distribution).length > 0 ? (
-            <div className="elements-list">
-              {Object.entries(distribution).map(([element, value]) => (
-                <div className="element-row" key={element}>
-                  <span>{element}</span>
-                  <div className="element-track"><span style={{ width: `${Math.max(4, Math.round((Number(value) / maxElementCount) * 100))}%` }} /></div>
-                  <strong>{formatDistributionValue(value)}</strong>
-                </div>
-              ))}
-            </div>
-          ) : <p className="muted-copy">后端暂未返回五行统计。</p>}
-        </section>
-
-      </div>
+      {chart.chart?.fortune_cycles && (
+        <FortuneSelector
+          key={`${normalized.beijing_datetime}-${normalized.gender}`}
+          cycles={chart.chart.fortune_cycles}
+        />
+      )}
 
       {warnings.length > 0 && (
         <aside className="warnings" aria-label="计算提示">

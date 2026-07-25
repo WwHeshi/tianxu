@@ -73,6 +73,73 @@ export interface ElementDistribution {
   total: Record<string, number>;
 }
 
+export interface FortunePillarDetail {
+  gan_zhi: string;
+  heavenly_stem: ComponentDetail;
+  earthly_branch: ComponentDetail;
+}
+
+export interface BigLuckTransitionDetail {
+  solar_datetime: string;
+  from_index: number;
+  from_gan_zhi: string | null;
+  to_index: number;
+  to_gan_zhi: string;
+}
+
+export interface MonthlyFortuneDetail {
+  index: number;
+  solar_term: string;
+  start_solar_datetime: string;
+  segment_start_solar_datetime: string;
+  segment_end_solar_datetime: string;
+  pillar: FortunePillarDetail;
+  big_luck_index_at_start: number;
+  big_luck_gan_zhi_at_start: string | null;
+  transition_phase: "before" | "after" | null;
+  transition: BigLuckTransitionDetail | null;
+}
+
+export interface AnnualFortuneDetail {
+  index: number;
+  year: number;
+  nominal_age: number;
+  segment_start_solar_datetime: string;
+  segment_end_solar_datetime: string;
+  pillar: FortunePillarDetail;
+  months: MonthlyFortuneDetail[];
+  big_luck_index_at_start: number;
+  big_luck_gan_zhi_at_start: string | null;
+  transition_phase: "before" | "after" | null;
+  transition: BigLuckTransitionDetail | null;
+}
+
+export interface BigLuckPeriodDetail {
+  index: number;
+  is_before_start: boolean;
+  start_year: number;
+  end_year: number;
+  start_nominal_age: number;
+  end_nominal_age: number;
+  start_solar_datetime: string;
+  end_solar_datetime: string;
+  pillar: FortunePillarDetail | null;
+  years: AnnualFortuneDetail[];
+}
+
+export interface FortuneCyclesDetail {
+  policy_version: string;
+  direction: "forward" | "backward";
+  start_offset: {
+    years: number;
+    months: number;
+    days: number;
+    hours: number;
+  };
+  start_solar_datetime: string;
+  big_luck_periods: BigLuckPeriodDetail[];
+}
+
 export interface ChartCalendarDetail {
   solar_datetime: string;
   lunar_year: number;
@@ -123,6 +190,7 @@ export interface ChartPreview {
     pillars: Record<PillarKey, PillarDetail>;
     day_master: ComponentDetail;
     element_distribution: ElementDistribution;
+    fortune_cycles: FortuneCyclesDetail | null;
   };
   calculation_policy: CalculationPolicy;
   solar_time_adjustment: SolarTimeAdjustment | null;
@@ -131,6 +199,7 @@ export interface ChartPreview {
     version: string;
     policy_version: string;
     shen_sha_policy_version: string;
+    fortune_policy_version: string;
     solar_time_note: string;
   };
   warnings: string[];

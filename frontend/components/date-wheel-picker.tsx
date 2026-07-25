@@ -35,6 +35,13 @@ interface WheelColumnProps {
   onChange: (value: number) => void;
 }
 
+interface PointerDragState {
+  pointerId: number;
+  startY: number;
+  startScrollTop: number;
+  moved: boolean;
+}
+
 interface DateWheelPickerProps {
   calendarType: CalendarType;
   value: CalendarDateValue;
@@ -175,10 +182,20 @@ function formatTime(parts: TimeParts): string {
 function WheelColumn({ label, options, value, onChange }: WheelColumnProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentValue = useRef(value);
+  const pendingInternalValue = useRef<number | null>(null);
+  const pointerDrag = useRef<PointerDragState | null>(null);
+  const suppressClick = useRef(false);
   const optionIdPrefix = useId();
+  currentValue.current = value;
 
   useEffect(() => {
-    const index = options.findIndex((option) => option.value === value);
+    if (pendingInternalValue.current === value) {
+      pendingInternalValue.current = null;
+      return;
+    }
+    pendingInternalValue.current = null;
+    const index = options.findIndex((option) => option.value === currentValue.current);
     if (index >= 0 && listRef.current) {
       listRef.current.scrollTo({ top: index * ITEM_HEIGHT });
     }
@@ -191,30 +208,84 @@ function WheelColumn({ label, options, value, onChange }: WheelColumnProps) {
     [],
   );
 
-  function selectNearest(list: HTMLDivElement) {
+  function selectNearest(list: HTMLDivElement, align = false) {
     const index = Math.min(
       options.length - 1,
       Math.max(0, Math.round(list.scrollTop / ITEM_HEIGHT)),
     );
     const option = options[index];
     if (!option) return;
-    if (option.value !== value) onChange(option.value);
-    list.scrollTo({ top: index * ITEM_HEIGHT, behavior: "smooth" });
+    if (option.value !== currentValue.current) {
+      currentValue.current = option.value;
+      pendingInternalValue.current = option.value;
+      onChange(option.value);
+    }
+    if (align) list.scrollTo({ top: index * ITEM_HEIGHT, behavior: "smooth" });
   }
 
   function handleScroll(event: React.UIEvent<HTMLDivElement>) {
     if (settleTimer.current) clearTimeout(settleTimer.current);
     const list = event.currentTarget;
-    settleTimer.current = setTimeout(() => selectNearest(list), 90);
+    settleTimer.current = setTimeout(() => selectNearest(list), 160);
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    const list = event.currentTarget;
+    pointerDrag.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startScrollTop: list.scrollTop,
+      moved: false,
+    };
+    list.setPointerCapture(event.pointerId);
+    list.classList.add("is-dragging");
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = pointerDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const distance = event.clientY - drag.startY;
+    if (!drag.moved && Math.abs(distance) < 3) return;
+    drag.moved = true;
+    event.preventDefault();
+    event.currentTarget.scrollTop = drag.startScrollTop - distance;
+  }
+
+  function finishPointerDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = pointerDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const list = event.currentTarget;
+    pointerDrag.current = null;
+    list.classList.remove("is-dragging");
+    if (list.hasPointerCapture(event.pointerId)) list.releasePointerCapture(event.pointerId);
+    if (!drag.moved) return;
+    event.preventDefault();
+    suppressClick.current = true;
+    setTimeout(() => {
+      suppressClick.current = false;
+    }, 0);
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    selectNearest(list, true);
+  }
+
+  function selectOption(option: WheelOption, index: number) {
+    if (option.value !== currentValue.current) {
+      currentValue.current = option.value;
+      pendingInternalValue.current = option.value;
+      onChange(option.value);
+    }
+    listRef.current?.scrollTo({ top: index * ITEM_HEIGHT, behavior: "smooth" });
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
-    const index = options.findIndex((option) => option.value === value);
+    const index = options.findIndex((option) => option.value === currentValue.current);
     const offset = event.key === "ArrowUp" ? -1 : 1;
-    const next = options[Math.min(options.length - 1, Math.max(0, index + offset))];
-    if (next) onChange(next.value);
+    const nextIndex = Math.min(options.length - 1, Math.max(0, index + offset));
+    const next = options[nextIndex];
+    if (next) selectOption(next, nextIndex);
   }
 
   return (
@@ -231,8 +302,13 @@ function WheelColumn({ label, options, value, onChange }: WheelColumnProps) {
           aria-activedescendant={`${optionIdPrefix}-${value}`}
           onScroll={handleScroll}
           onKeyDown={handleKeyDown}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={finishPointerDrag}
+          onPointerCancel={finishPointerDrag}
+          onLostPointerCapture={finishPointerDrag}
         >
-          {options.map((option) => (
+          {options.map((option, index) => (
             <button
               id={`${optionIdPrefix}-${option.value}`}
               className={`date-wheel-option ${option.value === value ? "is-selected" : ""}`}
@@ -241,7 +317,13 @@ function WheelColumn({ label, options, value, onChange }: WheelColumnProps) {
               aria-selected={option.value === value}
               tabIndex={-1}
               key={option.value}
-              onClick={() => onChange(option.value)}
+              onClick={(event) => {
+                if (suppressClick.current) {
+                  event.preventDefault();
+                  return;
+                }
+                selectOption(option, index);
+              }}
             >
               {option.label}
             </button>

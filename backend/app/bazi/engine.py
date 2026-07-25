@@ -6,14 +6,20 @@ model.  The API receives a stable, JSON-friendly representation instead.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from math import cos, pi, sin
+from typing import Any
 
 from lunar_python import Lunar, Solar
 from lunar_python.util import LunarUtil
 
 from ..schemas import (
+    AnnualFortune,
+    BigLuckPeriod,
+    BigLuckTransition,
     BirthInput,
     BranchComponent,
     CanonicalBirthplace,
@@ -24,7 +30,11 @@ from ..schemas import (
     DivisionPathItem,
     ElementDistribution,
     EngineInfo,
+    FortuneCycles,
+    FortunePillar,
+    FortuneStartOffset,
     HiddenStem,
+    MonthlyFortune,
     NormalizedBirthInput,
     Pillar,
     Pillars,
@@ -44,6 +54,9 @@ except PackageNotFoundError:  # pragma: no cover - only possible in a broken ins
     ENGINE_VERSION = "unknown"
 
 ENGINE_NAME = "lunar-python"
+FORTUNE_POLICY_VERSION = "v1"
+FORTUNE_SECT = 2
+FORTUNE_BIG_LUCK_PERIODS = 10
 ELEMENTS = ("木", "火", "土", "金", "水")
 GAN = tuple(LunarUtil.GAN[1:])
 ZHI = tuple(LunarUtil.ZHI[1:])
@@ -65,6 +78,33 @@ GROWTH_STAGE_OFFSETS = {
     "辛": 0,
     "癸": 3,
 }
+FLOW_MONTH_TERM_KEYS = (
+    ("立春", "立春"),
+    ("惊蛰", "惊蛰"),
+    ("清明", "清明"),
+    ("立夏", "立夏"),
+    ("芒种", "芒种"),
+    ("小暑", "小暑"),
+    ("立秋", "立秋"),
+    ("白露", "白露"),
+    ("寒露", "寒露"),
+    ("立冬", "立冬"),
+    ("大雪", "大雪"),
+    ("小寒", "XIAO_HAN"),
+)
+
+
+@dataclass(frozen=True)
+class _BigLuckSpec:
+    index: int
+    is_before_start: bool
+    start_year: int
+    end_year: int
+    start_nominal_age: int
+    end_nominal_age: int
+    start_solar_datetime: datetime
+    end_solar_datetime: datetime
+    pillar: FortunePillar | None
 
 # Heavenly stems alternate yang/yin, beginning with 甲; earthly branches do the
 # same, beginning with 子.  Keeping this local avoids exposing LunarUtil internals.
@@ -83,7 +123,11 @@ LIMITATIONS = [
     "提供出生地点时使用真太阳时；未提供地点时使用北京时间。规则 v1 均在所选时间基准的 00:00 换日。",
     "接近换日、时辰或节气边界时，应复核出生时间；真太阳时模式还应结合具体地址复核。",
     "均时差使用 NOAA 近似公式，节气表由排盘库提供，边界样例仍需独立历书交叉校验。",
-    "性别用于乾造、坤造标签及元辰规则，v1 尚未计算大运、起运和流年。",
+    "性别用于乾造、坤造标签、元辰规则和大运顺逆；`other` 不生成运势周期。",
+    (
+        "起运按相邻节的精确分钟数折算，4320 分钟折 1 年；"
+        "大运按精确交运时刻切换，流年立春换年，流月按十二个节换月。"
+    ),
     "五行分布是不加权计数，不代表旺衰或强弱评分。",
     "神煞采用天序固定 51 项规则集 v2；不同流派的神煞取法和名称可能存在差异。",
 ]
@@ -298,6 +342,280 @@ def _pillar(name: str, gan_zhi: str, day_master: str, shen_sha: list[str]) -> Pi
     )
 
 
+def _fortune_pillar(gan_zhi: str, day_master: str) -> FortunePillar:
+    if len(gan_zhi) != 2:
+        raise ChartCalculationError(
+            f"invalid fortune pillar returned by lunar-python: {gan_zhi!r}"
+        )
+    gan, zhi = gan_zhi
+    try:
+        branch_main_stem = HIDDEN_GAN[zhi][0]
+        branch = Component(
+            symbol=zhi,
+            element=ZHI_ELEMENT[zhi],
+            polarity=ZHI_POLARITY[zhi],
+            ten_god=SHI_SHEN.get(day_master + branch_main_stem),
+        )
+    except (KeyError, IndexError) as exc:  # pragma: no cover - upstream invariant
+        raise ChartCalculationError(
+            f"unknown fortune branch returned by lunar-python: {zhi!r}"
+        ) from exc
+    return FortunePillar(
+        gan_zhi=gan_zhi,
+        heavenly_stem=_component(gan, ten_god=SHI_SHEN.get(day_master + gan)),
+        earthly_branch=branch,
+    )
+
+
+def _solar_datetime(value: Any) -> datetime:
+    return datetime.strptime(value.toYmdHms(), "%Y-%m-%d %H:%M:%S")
+
+
+@lru_cache(maxsize=512)
+def _flow_month_starts(year: int) -> tuple[tuple[str, datetime], ...]:
+    table = Solar.fromYmdHms(year, 7, 1, 12, 0, 0).getLunar().getJieQiTable()
+    try:
+        return tuple(
+            (label, _solar_datetime(table[key])) for label, key in FLOW_MONTH_TERM_KEYS
+        )
+    except KeyError as exc:  # pragma: no cover - protects against upstream changes
+        raise ChartCalculationError(
+            f"lunar-python could not provide flow-month terms for {year}"
+        ) from exc
+
+
+@lru_cache(maxsize=512)
+def _flow_year_gan_zhi(year: int) -> str:
+    return Solar.fromYmdHms(year, 7, 1, 12, 0, 0).getLunar().getYearInGanZhiExact()
+
+
+def _flow_year_for_datetime(value: datetime) -> int:
+    li_chun = _flow_month_starts(value.year)[0][1]
+    return value.year if value >= li_chun else value.year - 1
+
+
+def _transition_in_interval(
+    specs: tuple[_BigLuckSpec, ...],
+    start: datetime,
+    end: datetime,
+) -> BigLuckTransition | None:
+    for position, spec in enumerate(specs[1:], start=1):
+        if start <= spec.start_solar_datetime < end:
+            previous = specs[position - 1]
+            if spec.pillar is None:  # pragma: no cover - construction invariant
+                raise ChartCalculationError("a formal big-luck period requires a pillar")
+            return BigLuckTransition(
+                solar_datetime=spec.start_solar_datetime,
+                from_index=previous.index,
+                from_gan_zhi=(previous.pillar.gan_zhi if previous.pillar else None),
+                to_index=spec.index,
+                to_gan_zhi=spec.pillar.gan_zhi,
+            )
+    return None
+
+
+def _annual_fortune(
+    year: int,
+    *,
+    index: int,
+    nominal_age: int,
+    day_master: str,
+    big_luck_spec: _BigLuckSpec,
+    big_luck_specs: tuple[_BigLuckSpec, ...],
+) -> AnnualFortune:
+    year_gan_zhi = _flow_year_gan_zhi(year)
+    year_gan_index = GAN.index(year_gan_zhi[0])
+    first_month_gan_index = (year_gan_index % 5 * 2 + 2) % len(GAN)
+    month_starts = _flow_month_starts(year)
+    annual_start = month_starts[0][1]
+    next_flow_year_start = _flow_month_starts(year + 1)[0][1]
+    segment_start = max(annual_start, big_luck_spec.start_solar_datetime)
+    segment_end = min(next_flow_year_start, big_luck_spec.end_solar_datetime)
+    if segment_start >= segment_end:  # pragma: no cover - caller filters intervals
+        raise ChartCalculationError("flow year does not overlap the big-luck period")
+
+    annual_transition = _transition_in_interval(
+        big_luck_specs,
+        annual_start,
+        next_flow_year_start,
+    )
+    annual_transition_phase = None
+    if annual_transition is not None:
+        if (
+            segment_start == annual_transition.solar_datetime
+            and annual_transition.to_index == big_luck_spec.index
+        ):
+            annual_transition_phase = "after"
+        elif (
+            segment_end == annual_transition.solar_datetime
+            and annual_transition.from_index == big_luck_spec.index
+        ):
+            annual_transition_phase = "before"
+    if annual_transition_phase is None:
+        annual_transition = None
+
+    months: list[MonthlyFortune] = []
+    for month_index in range(12):
+        month_start = month_starts[month_index][1]
+        month_end = (
+            month_starts[month_index + 1][1]
+            if month_index < 11
+            else next_flow_year_start
+        )
+        month_segment_start = max(month_start, segment_start)
+        month_segment_end = min(month_end, segment_end)
+        if month_segment_start >= month_segment_end:
+            continue
+
+        month_transition = _transition_in_interval(
+            big_luck_specs,
+            month_start,
+            month_end,
+        )
+        month_transition_phase = None
+        if month_transition is not None:
+            if (
+                month_segment_start == month_transition.solar_datetime
+                and month_transition.to_index == big_luck_spec.index
+            ):
+                month_transition_phase = "after"
+            elif (
+                month_segment_end == month_transition.solar_datetime
+                and month_transition.from_index == big_luck_spec.index
+            ):
+                month_transition_phase = "before"
+        if month_transition_phase is None:
+            month_transition = None
+        months.append(
+            MonthlyFortune(
+                index=month_index + 1,
+                solar_term=month_starts[month_index][0],
+                start_solar_datetime=month_start,
+                segment_start_solar_datetime=month_segment_start,
+                segment_end_solar_datetime=month_segment_end,
+                pillar=_fortune_pillar(
+                    GAN[(first_month_gan_index + month_index) % len(GAN)]
+                    + ZHI[(2 + month_index) % len(ZHI)],
+                    day_master,
+                ),
+                big_luck_index_at_start=big_luck_spec.index,
+                big_luck_gan_zhi_at_start=(
+                    big_luck_spec.pillar.gan_zhi if big_luck_spec.pillar else None
+                ),
+                transition_phase=month_transition_phase,
+                transition=month_transition,
+            )
+        )
+
+    return AnnualFortune(
+        index=index,
+        year=year,
+        nominal_age=nominal_age,
+        segment_start_solar_datetime=segment_start,
+        segment_end_solar_datetime=segment_end,
+        pillar=_fortune_pillar(year_gan_zhi, day_master),
+        months=months,
+        big_luck_index_at_start=big_luck_spec.index,
+        big_luck_gan_zhi_at_start=(
+            big_luck_spec.pillar.gan_zhi if big_luck_spec.pillar else None
+        ),
+        transition_phase=annual_transition_phase,
+        transition=annual_transition,
+    )
+
+
+def _calculate_fortune_cycles(
+    eight_char: Any,
+    *,
+    day_master: str,
+    gender: str,
+) -> FortuneCycles | None:
+    if gender == "other":
+        return None
+
+    yun = eight_char.getYun(1 if gender == "male" else 0, FORTUNE_SECT)
+    birth_solar = yun.getLunar().getSolar()
+    birth_solar_datetime = _solar_datetime(birth_solar)
+    birth_flow_year = _flow_year_for_datetime(birth_solar_datetime)
+    first_start_solar = yun.getStartSolar()
+    start_solar_datetime = _solar_datetime(first_start_solar)
+    specs: list[_BigLuckSpec] = []
+    for da_yun in yun.getDaYun(FORTUNE_BIG_LUCK_PERIODS):
+        index = da_yun.getIndex()
+        is_before_start = index == 0
+        if is_before_start:
+            exact_start = birth_solar_datetime
+            exact_end = start_solar_datetime
+        else:
+            exact_start = _solar_datetime(first_start_solar.nextYear((index - 1) * 10))
+            exact_end = _solar_datetime(first_start_solar.nextYear(index * 10))
+
+        start_year = _flow_year_for_datetime(exact_start)
+        end_year = _flow_year_for_datetime(exact_end - timedelta(microseconds=1))
+        start_age = start_year - birth_flow_year + 1
+        end_age = end_year - birth_flow_year + 1
+
+        specs.append(
+            _BigLuckSpec(
+                index=index,
+                is_before_start=is_before_start,
+                start_year=start_year,
+                end_year=end_year,
+                start_nominal_age=start_age,
+                end_nominal_age=end_age,
+                start_solar_datetime=exact_start,
+                end_solar_datetime=exact_end,
+                pillar=(
+                    None
+                    if is_before_start
+                    else _fortune_pillar(da_yun.getGanZhi(), day_master)
+                ),
+            )
+        )
+
+    frozen_specs = tuple(specs)
+    periods = [
+        BigLuckPeriod(
+            index=spec.index,
+            is_before_start=spec.is_before_start,
+            start_year=spec.start_year,
+            end_year=spec.end_year,
+            start_nominal_age=spec.start_nominal_age,
+            end_nominal_age=spec.end_nominal_age,
+            start_solar_datetime=spec.start_solar_datetime,
+            end_solar_datetime=spec.end_solar_datetime,
+            pillar=spec.pillar,
+            years=[
+                _annual_fortune(
+                    year,
+                    index=year_index,
+                    nominal_age=year - birth_flow_year + 1,
+                    day_master=day_master,
+                    big_luck_spec=spec,
+                    big_luck_specs=frozen_specs,
+                )
+                for year_index, year in enumerate(
+                    range(spec.start_year, spec.end_year + 1)
+                )
+            ],
+        )
+        for spec in frozen_specs
+    ]
+
+    return FortuneCycles(
+        policy_version=FORTUNE_POLICY_VERSION,
+        direction="forward" if yun.isForward() else "backward",
+        start_offset=FortuneStartOffset(
+            years=yun.getStartYear(),
+            months=yun.getStartMonth(),
+            days=yun.getStartDay(),
+            hours=yun.getStartHour(),
+        ),
+        start_solar_datetime=start_solar_datetime,
+        big_luck_periods=periods,
+    )
+
+
 def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
     """Calculate a chart with a deterministic, versioned policy."""
 
@@ -337,6 +655,11 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
 
     day_master = raw_pillars["day"][0]
     shen_sha = calculate_shen_sha(raw_pillars, gender=birth.gender.value)
+    fortune_cycles = _calculate_fortune_cycles(
+        eight_char,
+        day_master=day_master,
+        gender=birth.gender.value,
+    )
     pillar_map = {
         name: _pillar(name, value, day_master, shen_sha[name])
         for name, value in raw_pillars.items()
@@ -383,6 +706,7 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
                 hidden_stems=hidden_counts,
                 total=total,
             ),
+            fortune_cycles=fortune_cycles,
         ),
         calculation_policy=birth.calculation_policy,
         solar_time_adjustment=solar_time_adjustment,
@@ -391,6 +715,7 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
             version=ENGINE_VERSION,
             policy_version=birth.calculation_policy.version,
             shen_sha_policy_version=SHEN_SHA_POLICY_VERSION,
+            fortune_policy_version=FORTUNE_POLICY_VERSION,
             solar_time_note=(
                 SOLAR_TIME_NOTE if solar_time_adjustment is not None else BEIJING_TIME_NOTE
             ),

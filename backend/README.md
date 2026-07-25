@@ -79,6 +79,11 @@ chart
       na_yin / shen_sha
   day_master
   element_distribution
+  fortune_cycles
+    direction / start_offset / start_solar_datetime
+    big_luck_periods
+      years
+        months
 normalized_input
 calculation_policy
 solar_time_adjustment
@@ -130,6 +135,17 @@ CC BY 4.0 的七个传统堂区加路氹城代表点；台湾使用由官方 `da
   `other` 不推断元辰。扩展规则参考
   [`chxb/shensha@5b90110e55fe`](https://github.com/chxb/shensha/tree/5b90110e55fe)（MIT），
   并在本项目中独立实现、以测试固定。
+- 运势周期采用固定的 `v1` 口径，响应通过 `engine.fortune_policy_version` 返回版本。阳男
+  阴女顺行、阴男阳女逆行；起运按出生时刻到相邻节的精确分钟数折算，4320 分钟折 1 年。
+  大运起始年份按交运时刻所属的立春流年标记，流年以立春换年，流月依次以立春、惊蛰、
+  清明等十二个节换月。年龄采用流年虚岁，以出生时刻所属的立春流年为 1 岁，之后每个
+  立春流年递增 1 岁；`gender=other` 时不推断顺逆，`fortune_cycles` 返回 `null`。年份标签
+  只用于排盘展示，每步大运另行返回精确的 `start_solar_datetime` 和
+  `end_solar_datetime`。大运、流年、流月均按左闭右开的时间区间求交集，因此交运流年会
+  同时出现在相邻两步大运中，但各自只返回实际属于该步大运的月份；交运月也会拆成前后
+  两段。流年和流月通过 `segment_start_solar_datetime`、`segment_end_solar_datetime`、
+  `transition_phase` 与 `transition` 返回实际有效段及交运时刻，禁止把交运所在流年或流月
+  整体归入某一步大运。
 - 输入时间固定解释为北京时间；提供地点时换算为真太阳时，未提供地点时直接使用北京时间。
 - 经度修正以东经 120° 为基准，每度相差 4 分钟；均时差按出生日期和时间计算。
 - 日柱在所选排盘时间基准的 `00:00` 换日。真太阳时模式下，适配层修正了上游库在
@@ -139,7 +155,7 @@ CC BY 4.0 的七个传统堂区加路氹城代表点；台湾使用由官方 `da
   代表点都不等于具体医院或住址，同一区域内的实际经度仍可能带来数分钟偏差。
 - 坐标记录必须对应所选末级地点；缺失时明确报错，禁止静默回退到上级中心。
 - 上游节气表尚未通过独立天文算法和正式 golden dataset 交叉校验，临近节气的案例需要人工复核。
-- 性别用于输入摘要、乾造/坤造标签和元辰规则；当前未计算大运、起运和流年。
+- 性别用于输入摘要、乾造/坤造标签、元辰规则和大运顺逆。
 - 五行 `visible` 统计四个天干和四个地支本气，`hidden_stems` 对藏干做不加权计数；`total` 只是两者相加，不代表旺衰强弱。
 
 跨域来源通过逗号分隔的 `CORS_ORIGINS` 设置，默认允许本机的 `localhost:3000` 和 `127.0.0.1:3000`。

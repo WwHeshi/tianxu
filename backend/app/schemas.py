@@ -185,11 +185,81 @@ class Pillars(BaseModel):
     hour: Pillar
 
 
+class FortunePillar(BaseModel):
+    gan_zhi: str
+    heavenly_stem: Component
+    earthly_branch: Component
+
+
+class BigLuckTransition(BaseModel):
+    solar_datetime: datetime
+    from_index: int
+    from_gan_zhi: str | None
+    to_index: int
+    to_gan_zhi: str
+
+
+class MonthlyFortune(BaseModel):
+    index: int
+    solar_term: str
+    start_solar_datetime: datetime
+    segment_start_solar_datetime: datetime
+    segment_end_solar_datetime: datetime
+    pillar: FortunePillar
+    big_luck_index_at_start: int
+    big_luck_gan_zhi_at_start: str | None
+    transition_phase: Literal["before", "after"] | None
+    transition: BigLuckTransition | None
+
+
+class AnnualFortune(BaseModel):
+    index: int
+    year: int
+    nominal_age: int
+    segment_start_solar_datetime: datetime
+    segment_end_solar_datetime: datetime
+    pillar: FortunePillar
+    months: list[MonthlyFortune]
+    big_luck_index_at_start: int
+    big_luck_gan_zhi_at_start: str | None
+    transition_phase: Literal["before", "after"] | None
+    transition: BigLuckTransition | None
+
+
+class BigLuckPeriod(BaseModel):
+    index: int
+    is_before_start: bool
+    start_year: int
+    end_year: int
+    start_nominal_age: int
+    end_nominal_age: int
+    start_solar_datetime: datetime
+    end_solar_datetime: datetime
+    pillar: FortunePillar | None
+    years: list[AnnualFortune]
+
+
+class FortuneStartOffset(BaseModel):
+    years: int
+    months: int
+    days: int
+    hours: int
+
+
+class FortuneCycles(BaseModel):
+    policy_version: str
+    direction: Literal["forward", "backward"]
+    start_offset: FortuneStartOffset
+    start_solar_datetime: datetime
+    big_luck_periods: list[BigLuckPeriod]
+
+
 class Chart(BaseModel):
     calendar: ChartCalendar
     pillars: Pillars
     day_master: Component
     element_distribution: ElementDistribution
+    fortune_cycles: FortuneCycles | None
 
 
 class EngineInfo(BaseModel):
@@ -197,6 +267,7 @@ class EngineInfo(BaseModel):
     version: str
     policy_version: str
     shen_sha_policy_version: str
+    fortune_policy_version: str
     solar_time_note: str
 
 

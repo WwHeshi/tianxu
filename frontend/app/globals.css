@@ -85,7 +85,8 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .date-wheel-frame::before { top: 0; background: linear-gradient(to bottom, #f8faf8 12%, rgba(248,250,248,.25)); }
 .date-wheel-frame::after { bottom: 0; background: linear-gradient(to top, #f8faf8 12%, rgba(248,250,248,.25)); }
 .date-wheel-selection { position: absolute; z-index: 1; top: 50%; right: 5px; left: 5px; height: 40px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); transform: translateY(-50%); pointer-events: none; }
-.date-wheel-list { position: relative; z-index: 3; height: 200px; overflow-y: auto; padding: 80px 0; outline: none; overscroll-behavior: contain; scroll-snap-type: y mandatory; scrollbar-width: none; }
+.date-wheel-list { position: relative; z-index: 3; height: 200px; overflow-y: auto; padding: 80px 0; outline: none; overscroll-behavior: contain; scroll-snap-type: y proximity; scrollbar-width: none; cursor: grab; user-select: none; }
+.date-wheel-list.is-dragging { scroll-snap-type: none; cursor: grabbing; }
 .date-wheel-list::-webkit-scrollbar { display: none; }
 .date-wheel-list:focus-visible { box-shadow: inset 0 0 0 2px var(--teal); }
 .date-wheel-option { width: 100%; height: 40px; display: block; padding: 0 3px; color: var(--quiet); background: transparent; border: 0; scroll-snap-align: center; font-size: 13px; }
@@ -162,23 +163,49 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .pillar-table tbody tr:nth-child(even) > .pillar-row-label { background: #f3f6f4; }
 .primary-star { font-weight: 650; }
 .pillar-symbol { display: inline-block; font-family: "Noto Serif SC", "Songti SC", serif; font-size: 36px; line-height: 1.08; }
-.pillar-symbol[data-element="木"], .hidden-stem strong[data-element="木"] { color: #32805a; }
-.pillar-symbol[data-element="火"], .hidden-stem strong[data-element="火"] { color: #c13e31; }
-.pillar-symbol[data-element="土"], .hidden-stem strong[data-element="土"] { color: #927018; }
-.pillar-symbol[data-element="金"], .hidden-stem strong[data-element="金"] { color: #c87c13; }
-.pillar-symbol[data-element="水"], .hidden-stem strong[data-element="水"] { color: #2879b8; }
+.pillar-symbol[data-element="木"], .hidden-stem strong[data-element="木"], .fortune-pillar strong[data-element="木"] { color: #32805a; }
+.pillar-symbol[data-element="火"], .hidden-stem strong[data-element="火"], .fortune-pillar strong[data-element="火"] { color: #c13e31; }
+.pillar-symbol[data-element="土"], .hidden-stem strong[data-element="土"], .fortune-pillar strong[data-element="土"] { color: #927018; }
+.pillar-symbol[data-element="金"], .hidden-stem strong[data-element="金"], .fortune-pillar strong[data-element="金"] { color: #c87c13; }
+.pillar-symbol[data-element="水"], .hidden-stem strong[data-element="水"], .fortune-pillar strong[data-element="水"] { color: #2879b8; }
 .pillar-cell-stack { display: grid; gap: 4px; justify-items: center; line-height: 1.45; }
 .hidden-stem { display: inline-flex; align-items: baseline; justify-content: center; gap: 2px; }
 .hidden-stem strong { font-size: 15px; }
 .hidden-stem small { color: var(--quiet); font-size: 10px; }
 .shen-sha-row td { color: #987532; }
-.detail-grid { width: min(100%, 520px); display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 42px; padding-top: 28px; border-top: 1px solid var(--line); }
-.elements-list { display: grid; gap: 12px; }
-.element-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 25px; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; }
-.element-row strong { color: var(--ink); text-align: right; font-size: 12px; font-weight: 650; }
-.element-track { height: 7px; overflow: hidden; background: var(--line); border-radius: 99px; }
-.element-track span { display: block; height: 100%; min-width: 3px; background: var(--teal); border-radius: inherit; }
-.muted-copy { margin: 0; color: var(--quiet); font-size: 13px; }
+.fortune-section { margin-top: 42px; padding-top: 28px; border-top: 1px solid var(--line); }
+.fortune-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-bottom: 8px; padding: 12px 14px; color: var(--muted); background: #f7f9f7; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.fortune-summary strong { margin-left: auto; color: var(--teal); font-size: 12px; font-weight: 700; }
+.fortune-boundary-summary { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 13px; color: var(--muted); background: #f8faf8; border-left: 3px solid var(--teal); font-size: 12px; }
+.fortune-boundary-summary > strong { flex: 0 0 auto; color: var(--ink); font-size: 12px; }
+.fortune-boundary-summary > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; }
+.fortune-boundary-summary small { color: var(--quiet); font-size: 10px; }
+.fortune-boundary-summary.is-transition { background: #faf6eb; border-left-color: #bd812e; }
+.fortune-boundary-summary.is-transition > strong { color: #8a5b20; }
+.fortune-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); border: 1px solid var(--line); border-bottom: 0; background: var(--surface); }
+.fortune-boundary-summary + .fortune-row { border-radius: 7px 7px 0 0; }
+.fortune-row:last-child { border-bottom: 1px solid var(--line); border-radius: 0 0 7px 7px; }
+.fortune-row-label { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--quiet); background: #f7f9f7; border-right: 1px solid var(--line); font-family: "Noto Serif SC", "Songti SC", serif; font-size: 15px; }
+.fortune-scroll { display: flex; min-width: 0; overflow-x: auto; scroll-snap-type: x proximity; overscroll-behavior-inline: contain; scrollbar-width: none; -ms-overflow-style: none; }
+.fortune-scroll::-webkit-scrollbar { display: none; }
+.fortune-scroll[data-dragging="true"] { cursor: grabbing; scroll-snap-type: none; user-select: none; }
+.fortune-scroll[data-dragging="true"] .fortune-cell { cursor: grabbing; }
+.fortune-cell { position: relative; min-width: 84px; height: 146px; min-height: 146px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 8px 14px; scroll-snap-align: start; color: var(--ink); background: transparent; border: 0; border-right: 1px solid var(--line); border-radius: 0; font: inherit; cursor: pointer; transition: background-color .16s ease, box-shadow .16s ease; }
+.fortune-cell:last-child { border-right: 0; }
+.fortune-cell:hover { background: #f6f9f7; }
+.fortune-cell:focus-visible { z-index: 1; outline: 2px solid var(--teal); outline-offset: -2px; }
+.fortune-cell[aria-pressed="true"] { z-index: 1; background: #eef5f1; box-shadow: inset 0 -3px 0 var(--teal); }
+.fortune-cell[data-current="true"] { background-color: #faf7ef; }
+.fortune-cell[data-current="true"][aria-pressed="true"] { background: #eef5f1; }
+.fortune-cell-year { font-size: 12px; font-weight: 650; white-space: nowrap; }
+.fortune-cell > small { color: var(--quiet); font-size: 10px; white-space: nowrap; }
+.fortune-pillar { display: grid; gap: 1px; margin-top: 2px; }
+.fortune-pillar > span { display: flex; align-items: baseline; justify-content: center; gap: 3px; line-height: 1.15; }
+.fortune-pillar strong { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 25px; font-weight: 650; }
+.fortune-pillar small { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.fortune-transition-badge { padding: 2px 5px; color: #8a5b20; background: #f4e6c7; border-radius: 99px; font-size: 9px; font-style: normal; line-height: 1.2; white-space: nowrap; }
+.before-luck-label { margin: auto 0; color: var(--muted); font-family: "Noto Serif SC", "Songti SC", serif; font-size: 17px; font-weight: 600; }
+.fortune-current-dot { position: absolute; bottom: 6px; width: 5px; height: 5px; background: #d7782f; border-radius: 50%; }
 .warnings ul { margin: 5px 0 0; padding-left: 16px; }
 .warnings li + li { margin-top: 3px; }
 .warnings { align-items: flex-start; gap: 10px; margin-top: 37px; padding: 15px 17px; color: #74541f; background: #f8f1df; border-left: 3px solid #b47c2c; font-size: 12px; }
@@ -216,7 +243,15 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
   .pillar-table th, .pillar-table td { padding: 10px 4px; }
   .pillar-table .pillar-row-label { width: 50px; }
   .pillar-symbol { font-size: 32px; }
-  .detail-grid { margin-top: 32px; padding-top: 23px; }
+  .fortune-section { margin-top: 32px; padding-top: 23px; }
+  .fortune-summary { align-items: flex-start; gap: 5px; padding: 10px 12px; }
+  .fortune-summary span { flex-basis: 100%; }
+  .fortune-summary strong { margin-left: 0; }
+  .fortune-boundary-summary { align-items: flex-start; }
+  .fortune-boundary-summary > span { display: grid; gap: 2px; }
+  .fortune-row { grid-template-columns: 42px minmax(0, 1fr); }
+  .fortune-cell { min-width: 78px; height: 142px; min-height: 142px; padding-inline: 6px; }
+  .fortune-pillar strong { font-size: 23px; }
   .section-heading { align-items: baseline; }
   .section-heading > span { font-size: 11px; }
 }
