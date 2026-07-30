@@ -655,6 +655,18 @@ function FortuneSelector({ cycles }: { cycles: FortuneCyclesDetail }) {
 
   function selectPeriod(nextPeriod: BigLuckPeriodDetail) {
     setPeriodIndex(nextPeriod.index);
+    if (nextPeriod.index === initial.currentPeriodIndex) {
+      const currentAnnual = nextPeriod.years.find(
+        (item) => item.year === initial.currentYear,
+      ) ?? nextPeriod.years[0];
+      if (!currentAnnual) return;
+      setSelectedYear(currentAnnual.year);
+      const currentMonth = currentAnnual.months.find(
+        (item) => item.index === initial.currentMonthIndex,
+      ) ?? currentAnnual.months[0];
+      setMonthIndex(currentMonth?.index ?? 1);
+      return;
+    }
     const nextAnnual = nextPeriod.years.find((item) => item.year === selectedYear)
       ?? nextPeriod.years.find((item) => item.year === initial.currentYear)
       ?? nextPeriod.years[0];
