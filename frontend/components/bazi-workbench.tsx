@@ -3,17 +3,32 @@
 import {
   AlertCircle,
   CalendarDays,
+  CheckCircle2,
   ChevronRight,
   Clock3,
+  FileText,
   Info,
+  KeyRound,
   LoaderCircle,
   MapPin,
+  PlugZap,
   RotateCcw,
+  Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
+  Workflow,
+  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { previewChart } from "@/lib/api";
+import {
+  deleteModelSettings,
+  generateReport,
+  getModelSettings,
+  previewChart,
+  saveModelSettings,
+  testModelConnection,
+} from "@/lib/api";
 import { DateWheelPicker, TimeWheelPicker } from "@/components/date-wheel-picker";
 import {
   formatSolarDate,
@@ -30,6 +45,7 @@ import {
   resolveChinaBirthplace,
 } from "@/lib/china-areas";
 import type {
+  AgentDebugTrace,
   BirthplaceInput,
   AnnualFortuneDetail,
   BigLuckPeriodDetail,
@@ -39,8 +55,11 @@ import type {
   FortunePillarDetail,
   Gender,
   MonthlyFortuneDetail,
+  ModelApiProtocol,
+  ModelSettings,
   PillarDetail,
   PillarKey,
+  ReportGenerationResponse,
 } from "@/lib/types";
 
 const PILLARS: Array<{ key: PillarKey; label: string; description: string }> = [
@@ -58,6 +77,10 @@ const DEFAULT_POLICY = {
   time_basis: "beijing_standard_time" as const,
   true_solar_time: true as const,
 };
+
+function normalizeModelBaseUrl(value: string): string {
+  return value.trim().replace(/\/(responses|chat\/completions)\/?$/, "");
+}
 
 function readable(value: unknown, fallback = "暂未提供"): string {
   if (typeof value === "string" && value.trim()) return value;
@@ -148,6 +171,22 @@ export function BaziWorkbench() {
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [lastRequest, setLastRequest] = useState<ChartPreviewRequest | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelSettings, setModelSettings] = useState<ModelSettings | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getModelSettings()
+      .then((settings) => {
+        if (active) setModelSettings(settings);
+      })
+      .catch(() => {
+        // Settings may be intentionally disabled outside local development.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const maxDate = useBeijingToday();
   const secondLevelOptions = useMemo(
@@ -259,8 +298,27 @@ export function BaziWorkbench() {
           <span className="brand-divider" aria-hidden="true" />
           <span className="brand-section">八字排盘</span>
         </div>
-        <div className="topbar-note"><ShieldCheck size={15} aria-hidden="true" /> 规则可追溯</div>
+        <div className="topbar-actions">
+          <div className="topbar-note"><ShieldCheck size={15} aria-hidden="true" /> 规则可追溯</div>
+          <button
+            className="settings-button"
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="打开模型 API 设置"
+          >
+            <Settings size={16} aria-hidden="true" />
+            <span>设置 API</span>
+          </button>
+        </div>
       </header>
+
+      {settingsOpen && (
+        <ModelSettingsModal
+          current={modelSettings}
+          onClose={() => setSettingsOpen(false)}
+          onChange={setModelSettings}
+        />
+      )}
 
       <div className="workbench-grid">
         <aside className="input-panel" aria-labelledby="input-title">
@@ -404,7 +462,13 @@ export function BaziWorkbench() {
           {isSubmitting && <LoadingState />}
           {!isSubmitting && error && <ErrorState message={error} onRetry={() => lastRequest && void submitAgain(lastRequest)} />}
           {!isSubmitting && !error && !chart && <EmptyState />}
-          {!isSubmitting && !error && chart && <ChartResult chart={chart} />}
+          {!isSubmitting && !error && chart && lastRequest && (
+            <ChartResult
+              chart={chart}
+              request={lastRequest}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          )}
         </section>
       </div>
     </main>
@@ -421,6 +485,248 @@ export function BaziWorkbench() {
       setIsSubmitting(false);
     }
   }
+}
+
+function ModelSettingsModal({
+  current,
+  onClose,
+  onChange,
+}: {
+  current: ModelSettings | null;
+  onClose: () => void;
+  onChange: (settings: ModelSettings) => void;
+}) {
+  const [model, setModel] = useState(current?.model ?? "");
+  const [apiProtocol, setApiProtocol] = useState<ModelApiProtocol>(
+    current?.api_protocol ?? "responses",
+  );
+  const [baseUrl, setBaseUrl] = useState(current?.base_url ?? "https://api.openai.com/v1");
+  const [apiKey, setApiKey] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isLoading, setIsLoading] = useState(current === null);
+
+  useEffect(() => {
+    if (current === null) return;
+    setModel(current.model ?? "");
+    setApiProtocol(current.api_protocol ?? "responses");
+    setBaseUrl(current.base_url ?? "https://api.openai.com/v1");
+    setIsLoading(false);
+  }, [current]);
+
+  useEffect(() => {
+    if (current !== null) return;
+    let active = true;
+    void getModelSettings()
+      .then((settings) => {
+        if (!active) return;
+        onChange(settings);
+        setModel(settings.model ?? "");
+        setApiProtocol(settings.api_protocol ?? "responses");
+        setBaseUrl(settings.base_url ?? "https://api.openai.com/v1");
+      })
+      .catch((loadError) => {
+        if (active) {
+          setErrorMessage(loadError instanceof Error ? loadError.message : "无法读取模型设置。");
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [current, onChange]);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isSaving && !isTesting) onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isSaving, isTesting, onClose]);
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setErrorMessage("");
+    setStatusMessage("");
+    if (!model.trim() || !baseUrl.trim() || !apiKey.trim()) {
+      setErrorMessage("请填写模型 ID、Base URL 和新的 API 密钥。");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const saved = await saveModelSettings({
+        provider: "openai",
+        api_protocol: apiProtocol,
+        model: model.trim(),
+        base_url: normalizeModelBaseUrl(baseUrl),
+        api_key: apiKey.trim(),
+      });
+      onChange(saved);
+      setApiKey("");
+      setStatusMessage("设置已保存。关闭窗口后即可生成报告。");
+    } catch (saveError) {
+      setErrorMessage(saveError instanceof Error ? saveError.message : "保存失败，请稍后重试。");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleTestConnection() {
+    setErrorMessage("");
+    setStatusMessage("");
+    if (!model.trim() || !baseUrl.trim()) {
+      setErrorMessage("请先填写模型 ID 和 Base URL。");
+      return;
+    }
+    if (!apiKey.trim() && !current?.configured) {
+      setErrorMessage("请先输入 API 密钥。");
+      return;
+    }
+    setIsTesting(true);
+    try {
+      const tested = await testModelConnection({
+        provider: "openai",
+        api_protocol: apiProtocol,
+        model: model.trim(),
+        base_url: normalizeModelBaseUrl(baseUrl),
+        ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+      });
+      setStatusMessage(tested.message);
+    } catch (testError) {
+      setErrorMessage(
+        testError instanceof Error ? testError.message : "连接测试失败，请稍后重试。",
+      );
+    } finally {
+      setIsTesting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm("确定清除当前模型设置吗？此操作不会显示或恢复原密钥。")) return;
+    setErrorMessage("");
+    setStatusMessage("");
+    setIsSaving(true);
+    try {
+      await deleteModelSettings();
+      onChange({
+        configured: false,
+        provider: null,
+        api_protocol: null,
+        model: null,
+        base_url: null,
+        api_key_masked: null,
+      });
+      setModel("");
+      setApiKey("");
+      setStatusMessage("模型设置已清除。");
+    } catch (deleteError) {
+      setErrorMessage(deleteError instanceof Error ? deleteError.message : "清除失败，请稍后重试。");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !isSaving && !isTesting) onClose();
+    }}>
+      <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow">MODEL CONNECTION</p>
+            <h2 id="settings-title">模型 API 设置</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} disabled={isSaving || isTesting} aria-label="关闭设置">
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="settings-loading"><LoaderCircle className="spin" size={20} /> 正在读取设置</div>
+        ) : (
+          <form className="settings-form" onSubmit={handleSave}>
+            <div className="credential-status" data-configured={current?.configured || undefined}>
+              <KeyRound size={17} aria-hidden="true" />
+              <div>
+                <strong>{current?.configured ? "API 密钥已配置" : "尚未配置 API 密钥"}</strong>
+                <span>{current?.configured ? current.api_key_masked : "密钥保存后不会再次返回到浏览器"}</span>
+              </div>
+            </div>
+
+            <label className="settings-field">
+              <span>API 协议</span>
+              <select
+                value={apiProtocol}
+                onChange={(event) => setApiProtocol(event.target.value as ModelApiProtocol)}
+              >
+                <option value="responses">OpenAI Responses API</option>
+                <option value="chat_completions">OpenAI Chat Completions</option>
+              </select>
+              <small>
+                请求地址：{normalizeModelBaseUrl(baseUrl) || "Base URL"}
+                {apiProtocol === "responses" ? "/responses" : "/chat/completions"}
+              </small>
+            </label>
+            <label className="settings-field">
+              <span>模型 ID</span>
+              <input
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder="填写账户可用的模型 ID"
+                autoComplete="off"
+              />
+            </label>
+            <label className="settings-field">
+              <span>Base URL</span>
+              <input
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder="https://api.openai.com/v1"
+                inputMode="url"
+                autoComplete="url"
+              />
+            </label>
+            <label className="settings-field">
+              <span>{current?.configured ? "新 API 密钥（保存时替换）" : "API 密钥"}</span>
+              <input
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder={current?.configured ? "输入新密钥以替换现有密钥" : "输入 API 密钥"}
+                type="password"
+                autoComplete="new-password"
+              />
+            </label>
+
+            <p className="settings-security-note">
+              密钥会在服务端加密后存入 PostgreSQL；测试连接会发送一条极短请求，可能产生少量 token。
+            </p>
+            {errorMessage && <p className="form-message" role="alert"><AlertCircle size={15} /> {errorMessage}</p>}
+            {statusMessage && <p className="settings-success" role="status"><CheckCircle2 size={15} /> {statusMessage}</p>}
+
+            <div className="settings-actions">
+              {current?.configured && (
+                <button className="danger-button" type="button" onClick={handleDelete} disabled={isSaving || isTesting}>
+                  <Trash2 size={15} /> 清除设置
+                </button>
+              )}
+              <button className="test-button" type="button" onClick={handleTestConnection} disabled={isSaving || isTesting}>
+                {isTesting ? <LoaderCircle className="spin" size={16} /> : <PlugZap size={16} />}
+                {isTesting ? "正在测试" : "测试连接"}
+              </button>
+              <button className="primary-button settings-save" type="submit" disabled={isSaving || isTesting}>
+                {isSaving ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}
+                {isSaving ? "正在保存" : "保存"}
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
+    </div>
+  );
 }
 
 function EmptyState() {
@@ -801,7 +1107,232 @@ function FortuneSelector({ cycles }: { cycles: FortuneCyclesDetail }) {
   );
 }
 
-function ChartResult({ chart }: { chart: ChartPreview }) {
+const REPORT_SECTIONS: Array<{
+  key: keyof ReportGenerationResponse["report"];
+  label: string;
+}> = [
+  { key: "chart_overview", label: "命盘概览" },
+  { key: "temperament", label: "性情特点" },
+  { key: "career", label: "能力与事业" },
+  { key: "finance", label: "财务倾向" },
+  { key: "relationships", label: "关系模式" },
+  { key: "current_fortune", label: "当前运势周期" },
+  { key: "recommendations", label: "综合建议" },
+  { key: "limitations", label: "局限说明" },
+];
+
+function AgentDebugModal({
+  trace,
+  onClose,
+}: {
+  trace: AgentDebugTrace;
+  onClose: () => void;
+}) {
+  const protocolLabel = trace.request.api_protocol === "responses"
+    ? "OpenAI Responses"
+    : "OpenAI Chat Completions";
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div
+      className="modal-backdrop agent-debug-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="agent-debug-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agent-debug-title"
+      >
+        <div className="agent-debug-panel">
+          <div className="agent-debug-heading">
+            <div>
+              <p className="eyebrow">DEBUG TRACE</p>
+              <h4 id="agent-debug-title">Agent 执行链路</h4>
+            </div>
+            <div className="agent-debug-heading-actions">
+              <span>Trace {trace.trace_version}</span>
+              <button className="icon-button" type="button" onClick={onClose} aria-label="关闭执行链路">
+                <X size={17} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <p className="agent-debug-privacy"><Info size={14} aria-hidden="true" /> {trace.privacy_note}</p>
+
+          <ol className="agent-trace-timeline">
+            {trace.steps.map((step, index) => (
+              <li key={step.id} data-category={step.category}>
+                <span className="agent-trace-marker"><CheckCircle2 size={15} aria-hidden="true" /></span>
+                <div>
+                  <div className="agent-trace-title">
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <strong>{step.title}</strong>
+                    {step.duration_ms !== null && <small>{step.duration_ms} ms</small>}
+                  </div>
+                  <p>{step.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <div className="agent-debug-details">
+            <details>
+              <summary>系统提示词</summary>
+              <pre>{trace.system_prompt}</pre>
+            </details>
+            <details>
+              <summary>用户提示词</summary>
+              <pre>{trace.user_prompt}</pre>
+            </details>
+            <details>
+              <summary>模型上下文 JSON</summary>
+              <pre>{JSON.stringify(trace.context, null, 2)}</pre>
+            </details>
+            <details>
+              <summary>模型请求快照</summary>
+              <dl className="agent-request-meta">
+                <div><dt>协议</dt><dd>{protocolLabel}</dd></div>
+                <div><dt>模型</dt><dd>{trace.request.model}</dd></div>
+                <div><dt>地址</dt><dd>{trace.request.endpoint}</dd></div>
+                <div><dt>工具</dt><dd>{trace.request.tools_enabled ? "开启" : "关闭"}</dd></div>
+                <div><dt>历史</dt><dd>{trace.request.conversation_history ? "包含" : "不包含"}</dd></div>
+                <div><dt>输出约束</dt><dd>{trace.request.response_format}</dd></div>
+              </dl>
+              <pre>{JSON.stringify(trace.request.body, null, 2)}</pre>
+            </details>
+            <details>
+              <summary>输出 Schema</summary>
+              <pre>{JSON.stringify(trace.output_schema, null, 2)}</pre>
+            </details>
+          </div>
+
+          <p className="agent-debug-redacted">
+            已隐藏：{trace.redacted.join("、")}
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReportGenerator({
+  request,
+  onOpenSettings,
+}: {
+  request: ChartPreviewRequest;
+  onOpenSettings: () => void;
+}) {
+  const [result, setResult] = useState<ReportGenerationResponse | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [reportError, setReportError] = useState("");
+  const [traceOpen, setTraceOpen] = useState(false);
+
+  async function handleGenerate() {
+    setReportError("");
+    setResult(null);
+    setTraceOpen(false);
+    setIsGenerating(true);
+    try {
+      setResult(await generateReport(request));
+    } catch (generationError) {
+      setReportError(
+        generationError instanceof Error ? generationError.message : "报告生成失败，请稍后重试。",
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  return (
+    <section className="report-section" aria-labelledby="report-title">
+      <div className="report-entry">
+        <div className="report-entry-copy">
+          <span className="report-icon"><FileText size={19} aria-hidden="true" /></span>
+          <div>
+            <h3 id="report-title">八字分析报告</h3>
+            <p>由模型基于当前命盘生成八个固定章节，不含知识库或古籍引文。</p>
+          </div>
+        </div>
+        <button className="report-button" type="button" onClick={handleGenerate} disabled={isGenerating}>
+          {isGenerating ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}
+          {isGenerating ? "正在生成报告" : result ? "重新生成" : "生成分析报告"}
+        </button>
+      </div>
+
+      {isGenerating && (
+        <div className="report-progress" role="status">
+          <LoaderCircle className="spin" size={18} aria-hidden="true" />
+          <div><strong>正在撰写报告</strong><span>模型只接收精简命盘与当前运势，通常需要几十秒。</span></div>
+        </div>
+      )}
+
+      {reportError && (
+        <div className="report-error" role="alert">
+          <AlertCircle size={17} aria-hidden="true" />
+          <div><strong>暂时无法生成报告</strong><span>{reportError}</span></div>
+          <button type="button" onClick={onOpenSettings}>检查 API 设置</button>
+        </div>
+      )}
+
+      {result && !isGenerating && (
+        <article className="generated-report">
+          <header>
+            <div>
+              <p className="eyebrow">GENERATED REPORT</p>
+              <h3>命盘分析</h3>
+            </div>
+            <button
+              className="agent-trace-button"
+              type="button"
+              aria-expanded={traceOpen}
+              onClick={() => setTraceOpen((open) => !open)}
+            >
+              <Workflow size={15} aria-hidden="true" />
+              {traceOpen ? "收起执行链路" : "查看执行链路"}
+            </button>
+          </header>
+          {traceOpen && (
+            <AgentDebugModal trace={result.debug_trace} onClose={() => setTraceOpen(false)} />
+          )}
+          <div className="report-sections">
+            {REPORT_SECTIONS.map((section, index) => (
+              <section key={section.key}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <h4>{section.label}</h4>
+                  <p>{result.report[section.key]}</p>
+                </div>
+              </section>
+            ))}
+          </div>
+          <footer>
+            本报告属于传统文化视角下的模型生成内容，仅供参考 · 提示词 {result.metadata.prompt_version}
+          </footer>
+        </article>
+      )}
+    </section>
+  );
+}
+
+function ChartResult({
+  chart,
+  request,
+  onOpenSettings,
+}: {
+  chart: ChartPreview;
+  request: ChartPreviewRequest;
+  onOpenSettings: () => void;
+}) {
   const calendar = chart.chart?.calendar;
   const normalized = chart.normalized_input ?? {};
   const warnings = Array.isArray(chart.warnings) ? chart.warnings : [];
@@ -970,6 +1501,7 @@ function ChartResult({ chart }: { chart: ChartPreview }) {
         </aside>
       )}
 
+      <ReportGenerator request={request} onOpenSettings={onOpenSettings} />
     </div>
   );
 }

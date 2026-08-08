@@ -1,12 +1,102 @@
 """Versioned HTTP routes."""
 
-from fastapi import APIRouter, HTTPException, status
+from time import perf_counter
+from typing import Annotated
+from urllib.parse import urlsplit
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ..bazi.engine import ENGINE_VERSION, ChartCalculationError, calculate_chart
 from ..bazi.locations import LocationDataError, validate_location_data
-from ..schemas import BirthInput, ChartPreviewResponse, HealthResponse
+from ..config import app_environment, encryption_key_version, model_settings_enabled
+from ..credentials import (
+    LOCAL_CREDENTIAL_SCOPE,
+    ModelCredentialRepository,
+    get_credential_repository,
+)
+from ..models import ModelCredential
+from ..reports import (
+    PROMPT_VERSION,
+    REPORT_JSON_SCHEMA,
+    REPORT_SCHEMA_VERSION,
+    ModelProviderError,
+    generate_structured_report,
+    test_model_connection,
+)
+from ..schemas import (
+    AgentDebugTrace,
+    AgentRequestDebug,
+    AgentTraceStep,
+    BirthInput,
+    ChartPreviewResponse,
+    HealthResponse,
+    ModelConnectionTestRequest,
+    ModelConnectionTestResponse,
+    ModelSettingsResponse,
+    ModelSettingsUpdate,
+    ReportGenerationResponse,
+    ReportMetadata,
+)
+from ..security import SecretCipher, SecretEncryptionError
 
 router = APIRouter(prefix="/api/v1")
+CredentialRepositoryDependency = Annotated[
+    ModelCredentialRepository, Depends(get_credential_repository)
+]
+
+
+def _require_model_settings_enabled() -> None:
+    if not model_settings_enabled():
+        raise HTTPException(status_code=404, detail="模型设置接口未启用")
+
+
+def _model_settings_response(
+    credential: ModelCredential | None,
+) -> ModelSettingsResponse:
+    if credential is None:
+        return ModelSettingsResponse(configured=False)
+    return ModelSettingsResponse(
+        configured=True,
+        provider=credential.provider,
+        api_protocol=credential.api_protocol,
+        model=credential.model,
+        base_url=credential.base_url,
+        api_key_masked=f"••••{credential.api_key_last_four}",
+    )
+
+
+def _validate_base_url(base_url: str) -> None:
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=422, detail="Base URL 必须是有效的 HTTP(S) 地址")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise HTTPException(status_code=422, detail="Base URL 不能包含认证信息、查询参数或片段")
+    if parsed.scheme == "http":
+        local_hosts = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+        if (
+            app_environment() not in {"development", "local", "test"}
+            or parsed.hostname.lower() not in local_hosts
+        ):
+            raise HTTPException(status_code=422, detail="HTTP Base URL 只允许指向本地开发服务")
+    if parsed.hostname.lower() in {"169.254.169.254", "metadata.google.internal"}:
+        raise HTTPException(status_code=422, detail="不允许使用该 Base URL")
+
+
+def _normalize_base_url(base_url: str, api_protocol: str) -> str:
+    normalized = base_url.rstrip("/")
+    suffixes = {
+        "responses": "/responses",
+        "chat_completions": "/chat/completions",
+    }
+    for protocol, suffix in suffixes.items():
+        if not normalized.endswith(suffix):
+            continue
+        if protocol != api_protocol:
+            raise HTTPException(status_code=422, detail="API 地址与所选协议不一致")
+        normalized = normalized[: -len(suffix)]
+        break
+    _validate_base_url(normalized)
+    return normalized
 
 
 @router.get("/health", response_model=HealthResponse, tags=["system"])
@@ -32,3 +122,218 @@ def preview_chart(payload: BirthInput) -> ChartPreviewResponse:
         return calculate_chart(payload)
     except ChartCalculationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/model-settings",
+    response_model=ModelSettingsResponse,
+    tags=["model-settings"],
+)
+async def get_model_settings(
+    repository: CredentialRepositoryDependency,
+) -> ModelSettingsResponse:
+    _require_model_settings_enabled()
+    return _model_settings_response(await repository.get())
+
+
+@router.put(
+    "/model-settings",
+    response_model=ModelSettingsResponse,
+    tags=["model-settings"],
+)
+async def put_model_settings(
+    payload: ModelSettingsUpdate,
+    repository: CredentialRepositoryDependency,
+) -> ModelSettingsResponse:
+    _require_model_settings_enabled()
+    base_url = _normalize_base_url(payload.base_url, payload.api_protocol)
+    api_key = payload.api_key.get_secret_value().strip()
+    if len(api_key) < 8:
+        raise HTTPException(status_code=422, detail="API 密钥长度不足")
+    key_version = encryption_key_version()
+    try:
+        encrypted = SecretCipher.from_environment().encrypt(
+            api_key,
+            scope=LOCAL_CREDENTIAL_SCOPE,
+            key_version=key_version,
+        )
+    except SecretEncryptionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    credential = await repository.upsert(
+        provider=payload.provider,
+        api_protocol=payload.api_protocol,
+        model=payload.model,
+        base_url=base_url,
+        encrypted_api_key=encrypted,
+        api_key_last_four=api_key[-4:],
+        encryption_key_version=key_version,
+    )
+    return _model_settings_response(credential)
+
+
+@router.post(
+    "/model-settings/test",
+    response_model=ModelConnectionTestResponse,
+    tags=["model-settings"],
+)
+async def test_model_settings_connection(
+    payload: ModelConnectionTestRequest,
+    repository: CredentialRepositoryDependency,
+) -> ModelConnectionTestResponse:
+    _require_model_settings_enabled()
+    base_url = _normalize_base_url(payload.base_url, payload.api_protocol)
+
+    api_key = payload.api_key.get_secret_value().strip() if payload.api_key else ""
+    if not api_key:
+        credential = await repository.get()
+        if credential is None:
+            raise HTTPException(status_code=409, detail="请先输入 API 密钥")
+        try:
+            api_key = SecretCipher.from_environment().decrypt(
+                credential.encrypted_api_key,
+                scope=credential.scope,
+                key_version=credential.encryption_key_version,
+            )
+        except SecretEncryptionError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        await test_model_connection(
+            base_url=base_url,
+            model=payload.model,
+            api_key=api_key,
+            api_protocol=payload.api_protocol,
+        )
+    except ModelProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return ModelConnectionTestResponse(
+        ok=True,
+        provider=payload.provider,
+        api_protocol=payload.api_protocol,
+        model=payload.model,
+        message="连接成功，API 密钥和模型均可用。",
+    )
+
+
+@router.delete(
+    "/model-settings",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["model-settings"],
+)
+async def delete_model_settings(
+    repository: CredentialRepositoryDependency,
+) -> Response:
+    _require_model_settings_enabled()
+    await repository.delete()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/reports/generate",
+    response_model=ReportGenerationResponse,
+    tags=["reports"],
+)
+async def generate_report(
+    payload: BirthInput,
+    repository: CredentialRepositoryDependency,
+) -> ReportGenerationResponse:
+    _require_model_settings_enabled()
+    chart_started = perf_counter()
+    try:
+        chart = calculate_chart(payload)
+    except ChartCalculationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    chart_duration_ms = round((perf_counter() - chart_started) * 1000)
+
+    credential = await repository.get()
+    if credential is None:
+        raise HTTPException(status_code=409, detail="请先在右上角配置模型 API")
+    try:
+        api_key = SecretCipher.from_environment().decrypt(
+            credential.encrypted_api_key,
+            scope=credential.scope,
+            key_version=credential.encryption_key_version,
+        )
+        execution = await generate_structured_report(
+            chart=chart,
+            credential=credential,
+            api_key=api_key,
+        )
+    except SecretEncryptionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return ReportGenerationResponse(
+        chart=chart,
+        report=execution.report,
+        metadata=ReportMetadata(
+            provider=credential.provider,
+            api_protocol=credential.api_protocol,
+            model=credential.model,
+            prompt_version=PROMPT_VERSION,
+            schema_version=REPORT_SCHEMA_VERSION,
+            engine_version=ENGINE_VERSION,
+        ),
+        debug_trace=AgentDebugTrace(
+            trace_version="v1",
+            steps=[
+                AgentTraceStep(
+                    id="chart",
+                    title="服务端重新排盘",
+                    category="deterministic",
+                    status="completed",
+                    detail="后端根据 BirthInput 重新计算命盘，不采用客户端命盘 JSON。",
+                    duration_ms=chart_duration_ms,
+                ),
+                AgentTraceStep(
+                    id="context",
+                    title="裁剪模型上下文",
+                    category="context",
+                    status="completed",
+                    detail="保留四柱及派生数据，只选取当前大运、流年和流月。",
+                ),
+                AgentTraceStep(
+                    id="prompt",
+                    title="组装提示词",
+                    category="prompt",
+                    status="completed",
+                    detail="组合固定系统约束、用户指令与精简命盘上下文。",
+                ),
+                AgentTraceStep(
+                    id="model",
+                    title="调用模型",
+                    category="model",
+                    status="completed",
+                    detail=f"通过 {credential.api_protocol} 协议发起一次无工具模型请求。",
+                    duration_ms=execution.model_latency_ms,
+                ),
+                AgentTraceStep(
+                    id="validation",
+                    title="校验报告结构",
+                    category="validation",
+                    status="completed",
+                    detail="使用 Pydantic 校验八个固定章节，拒绝缺失或额外字段。",
+                ),
+            ],
+            system_prompt=execution.system_prompt,
+            user_prompt=execution.user_prompt,
+            context=execution.context,
+            request=AgentRequestDebug(
+                method="POST",
+                endpoint=execution.endpoint,
+                provider=credential.provider,
+                api_protocol=credential.api_protocol,
+                model=credential.model,
+                tools_enabled=False,
+                conversation_history=False,
+                request_count=1,
+                response_format=execution.response_format,
+                body=execution.request_body,
+            ),
+            output_schema=REPORT_JSON_SCHEMA,
+            redacted=["API 密钥", "Authorization 请求头", "上游原始响应"],
+            privacy_note="调试信息包含出生与命盘上下文，仅用于本地开发排查。",
+        ),
+    )

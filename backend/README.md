@@ -1,11 +1,12 @@
 # Tianxu Backend
 
-FastAPI 后端，当前只提供确定性排盘，不调用 AI，也不保存出生资料。
+FastAPI 后端，提供确定性排盘、加密模型设置和一次性结构化报告。报告请求不会持久化出生资料。
 
 ## 本地运行
 
 ```powershell
 uv sync
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -19,6 +20,31 @@ uv run pytest
 
 - `GET /api/v1/health`
 - `POST /api/v1/charts/preview`
+- `GET /api/v1/model-settings`
+- `PUT /api/v1/model-settings`
+- `POST /api/v1/model-settings/test`
+- `DELETE /api/v1/model-settings`
+- `POST /api/v1/reports/generate`
+
+`model-settings` 端点由服务端环境变量 `MODEL_SETTINGS_ENABLED` 控制。当前没有用户认证，
+只应在本地开发环境开放。模型 API 密钥使用 `APP_ENCRYPTION_KEY`（Base64 编码的 32 字节
+主密钥）进行 AES-GCM 加密；数据库只保存密文、末四位和模型连接元数据，GET 响应不返回
+明文密钥。
+
+连接测试使用当前表单的协议、模型、Base URL 和新密钥；未输入新密钥但已有保存配置时，
+使用已保存密钥。测试会向所选协议发送一条最小生成请求以验证真实接口、鉴权和模型访问，
+可能产生极少量 token，但不会生成报告或改写数据库。
+
+报告接口接收与排盘相同的出生输入，并在服务端重新排盘。发送给模型的上下文不包含完整
+大运时间线，只保留当前大运、流年和流月；模型以一次 Responses API 或兼容的 Chat
+Completions 调用返回八个固定章节。当前没有知识库、RAG、工具调用、引文或对话历史。
+
+成功响应同时返回本次报告的 `debug_trace`，用于本地展示排盘、上下文裁剪、提示词组装、
+模型调用和输出校验链路。调试快照包含提示词与命盘上下文，但不包含 API 密钥、
+Authorization 请求头或上游原始响应，不应在未授权的生产页面公开。
+
+设置中的 Base URL 只填写版本根路径，后端按协议追加端点。例如智谱 Chat Completions
+填写 `https://open.bigmodel.cn/api/paas/v4`，后端会追加 `/chat/completions`。
 
 请求示例：
 

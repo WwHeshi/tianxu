@@ -205,3 +205,95 @@ export interface ChartPreview {
   warnings: string[];
   limitations: string[];
 }
+
+export type ModelApiProtocol = "responses" | "chat_completions";
+
+export interface ModelSettings {
+  configured: boolean;
+  provider: string | null;
+  api_protocol: ModelApiProtocol | null;
+  model: string | null;
+  base_url: string | null;
+  api_key_masked: string | null;
+}
+
+export interface ModelSettingsUpdate {
+  provider: "openai";
+  api_protocol: ModelApiProtocol;
+  model: string;
+  base_url: string;
+  api_key: string;
+}
+
+export interface ModelConnectionTestRequest {
+  provider: "openai";
+  api_protocol: ModelApiProtocol;
+  model: string;
+  base_url: string;
+  api_key?: string;
+}
+
+export interface ModelConnectionTestResponse {
+  ok: true;
+  provider: string;
+  api_protocol: ModelApiProtocol;
+  model: string;
+  message: string;
+}
+
+export interface BaziReport {
+  chart_overview: string;
+  temperament: string;
+  career: string;
+  finance: string;
+  relationships: string;
+  current_fortune: string;
+  recommendations: string;
+  limitations: string;
+}
+
+export interface AgentTraceStep {
+  id: string;
+  title: string;
+  category: "deterministic" | "context" | "prompt" | "model" | "validation";
+  status: "completed";
+  detail: string;
+  duration_ms: number | null;
+}
+
+export interface AgentDebugTrace {
+  trace_version: "v1";
+  steps: AgentTraceStep[];
+  system_prompt: string;
+  user_prompt: string;
+  context: Record<string, unknown>;
+  request: {
+    method: "POST";
+    endpoint: string;
+    provider: string;
+    api_protocol: ModelApiProtocol;
+    model: string;
+    tools_enabled: false;
+    conversation_history: false;
+    request_count: 1;
+    response_format: "json_schema" | "prompted_json";
+    body: Record<string, unknown>;
+  };
+  output_schema: Record<string, unknown>;
+  redacted: string[];
+  privacy_note: string;
+}
+
+export interface ReportGenerationResponse {
+  chart: ChartPreview;
+  report: BaziReport;
+  metadata: {
+    provider: string;
+    api_protocol: ModelApiProtocol;
+    model: string;
+    prompt_version: string;
+    schema_version: string;
+    engine_version: string;
+  };
+  debug_trace: AgentDebugTrace;
+}

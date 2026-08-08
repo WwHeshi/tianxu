@@ -1,6 +1,6 @@
 # Tianxu 八字分析 Agent
 
-这是一个前后端分离的八字分析 Web 应用。系统先用确定性的排盘引擎计算命盘，再由 Agent 基于结构化命盘生成解释和回答追问。模型不负责自行计算四柱。
+这是一个前后端分离的八字分析 Web 应用。系统先用确定性的排盘引擎计算命盘，再由模型基于结构化命盘生成固定章节的分析报告。模型不负责自行计算四柱。
 
 出生信息统一按北京时间输入，并选择中国大陆、香港、澳门或台湾的静态地点。后端根据
 地点代表点经度计算经度修正和均时差，将北京时间换算为真太阳时后排盘；代表点属于
@@ -19,23 +19,23 @@
 
 ## 当前状态
 
-项目正在按 MVP 分阶段搭建。`frontend/`、`backend/` 和排盘规则会逐步完善；根目录已经提供统一的本地开发配置。
+当前 MVP 提供确定性排盘、当前大运/流年/流月展示和一次性 AI 报告。第一版不包含知识库、RAG、Agent 工具或对话历史；报告只使用服务端重新计算的命盘和精简后的当前运势上下文。
 
 ## Docker 热更新开发（推荐）
 
 需要 Docker Desktop（包含 Docker Compose）。本地默认值已经写在 Compose 中，无需创建 `.env`：
 
 ```powershell
-docker compose -f docker-compose.dev.yml up --build
+docker compose -f docker-compose.dev.yml up --build -d
 ```
 
-只有端口冲突或访问地址变化时才需要覆盖配置：
+只有端口冲突、访问地址变化或需要替换开发主加密密钥时才需要覆盖配置：
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-复制后直接使用默认内容即可。修改 `FRONTEND_PORT` 时要同步修改 `CORS_ORIGINS`；修改 `BACKEND_PORT` 时要同步修改 `NEXT_PUBLIC_API_BASE_URL`。
+复制后修改 `APP_ENCRYPTION_KEY`，再启动服务。该值是服务端加密模型 API 密钥的 32 字节主密钥，不得使用 `NEXT_PUBLIC_*` 前缀，也不得提交真实生产值。修改 `FRONTEND_PORT` 时要同步修改 `CORS_ORIGINS`；修改 `BACKEND_PORT` 时要同步修改 `NEXT_PUBLIC_API_BASE_URL`。
 
 启动后访问：
 
@@ -53,7 +53,7 @@ Copy-Item .env.example .env
 
 修改 `pyproject.toml`、`uv.lock`、`package.json`、`package-lock.json` 或 `next.config.ts` 后，需要重新执行 `docker compose -f docker-compose.dev.yml up --build`。如果新增前端顶层源码目录，也需要将该目录加入 `frontend.volumes`。
 
-默认数据库密码只适合本地开发，请勿用于生产环境。停止热更新环境：
+Compose 中的数据库密码和主加密密钥默认值只适合本地界面联调，请勿用于生产环境或保存正式密钥。停止热更新环境：
 
 ```powershell
 docker compose -f docker-compose.dev.yml down
@@ -69,6 +69,7 @@ docker compose -f docker-compose.dev.yml down
 # 终端一：后端
 cd backend
 uv sync
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # 终端二：前端
@@ -77,7 +78,9 @@ npm ci
 npm run dev
 ```
 
-当前后端尚未使用数据库和模型服务，相应连接信息由 Compose 的开发默认值占位，不需要手动填写。进入持久化和 Agent 阶段后，再单独增加真实数据库及模型密钥配置。
+非 Docker 启动前需要提供可用的 `DATABASE_URL` 和 `APP_ENCRYPTION_KEY`。前者用于 PostgreSQL，后者必须是 Base64 编码的 32 字节随机值。模型 API 密钥不放在环境变量中：在页面右上角设置后，后端用 AES-GCM 加密并保存到 PostgreSQL，只向浏览器返回配置状态和末四位。
+
+当前没有用户认证，因此 `MODEL_SETTINGS_ENABLED` 默认只在 `development`、`local` 和 `test` 环境开放；生产环境必须保持关闭，直到接入用户身份和授权校验。
 
 ## 目录约定
 
@@ -95,8 +98,8 @@ tianxu/
 ## 架构边界
 
 - 排盘引擎是确定性模块：负责历法转换、四柱和派生数据，并记录计算规则与版本。
-- Agent 只消费已验证的命盘 JSON、规则上下文和用户问题，负责解释；它不能修改或重新推算四柱。
-- REST 用于命盘和会话资源；分析、聊天为 SSE 预留流式接口。
+- 报告模块只消费已验证的命盘 JSON 和精简上下文，负责解释；它不能修改或重新推算四柱。
+- 当前报告通过一次 REST 请求生成固定结构 JSON，不保留会话，也不调用工具。
 - 出生时间、地点等敏感信息不应写入普通日志。详见 [架构 ADR](docs/adr/0001-architecture.md)。
 
 ## 常用命令

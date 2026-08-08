@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from .bazi.policy import CalculationPolicy
 
@@ -285,3 +285,118 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     service: str
     engine_version: str
+
+
+ApiProtocol = Literal["responses", "chat_completions"]
+
+
+class ModelSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["openai"] = "openai"
+    api_protocol: ApiProtocol = "responses"
+    model: str = Field(min_length=1, max_length=128)
+    base_url: str = Field(default="https://api.openai.com/v1", min_length=1, max_length=512)
+    api_key: SecretStr = Field(min_length=8, max_length=1024)
+
+    @field_validator("model", "base_url")
+    @classmethod
+    def strip_setting(cls, value: str) -> str:
+        return value.strip().rstrip("/")
+
+
+class ModelSettingsResponse(BaseModel):
+    configured: bool
+    provider: str | None = None
+    api_protocol: ApiProtocol | None = None
+    model: str | None = None
+    base_url: str | None = None
+    api_key_masked: str | None = None
+
+
+class ModelConnectionTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["openai"] = "openai"
+    api_protocol: ApiProtocol = "responses"
+    model: str = Field(min_length=1, max_length=128)
+    base_url: str = Field(default="https://api.openai.com/v1", min_length=1, max_length=512)
+    api_key: SecretStr | None = Field(default=None, min_length=8, max_length=1024)
+
+    @field_validator("model", "base_url")
+    @classmethod
+    def strip_connection_setting(cls, value: str) -> str:
+        return value.strip().rstrip("/")
+
+
+class ModelConnectionTestResponse(BaseModel):
+    ok: Literal[True]
+    provider: str
+    api_protocol: ApiProtocol
+    model: str
+    message: str
+
+
+class BaziReport(BaseModel):
+    """Strict model output; labels are mapped to Chinese in the UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chart_overview: str = Field(min_length=1, max_length=4000)
+    temperament: str = Field(min_length=1, max_length=4000)
+    career: str = Field(min_length=1, max_length=4000)
+    finance: str = Field(min_length=1, max_length=4000)
+    relationships: str = Field(min_length=1, max_length=4000)
+    current_fortune: str = Field(min_length=1, max_length=4000)
+    recommendations: str = Field(min_length=1, max_length=4000)
+    limitations: str = Field(min_length=1, max_length=4000)
+
+
+class ReportMetadata(BaseModel):
+    provider: str
+    api_protocol: ApiProtocol
+    model: str
+    prompt_version: str
+    schema_version: str
+    engine_version: str
+
+
+class AgentTraceStep(BaseModel):
+    id: str
+    title: str
+    category: Literal["deterministic", "context", "prompt", "model", "validation"]
+    status: Literal["completed"]
+    detail: str
+    duration_ms: int | None = None
+
+
+class AgentRequestDebug(BaseModel):
+    method: Literal["POST"]
+    endpoint: str
+    provider: str
+    api_protocol: ApiProtocol
+    model: str
+    tools_enabled: Literal[False]
+    conversation_history: Literal[False]
+    request_count: Literal[1]
+    response_format: Literal["json_schema", "prompted_json"]
+    body: dict[str, Any]
+
+
+class AgentDebugTrace(BaseModel):
+    trace_version: Literal["v1"]
+    steps: list[AgentTraceStep]
+    system_prompt: str
+    user_prompt: str
+    context: dict[str, Any]
+    request: AgentRequestDebug
+    output_schema: dict[str, Any]
+    redacted: list[str]
+    privacy_note: str
+
+
+class ReportGenerationResponse(BaseModel):
+    chart: ChartPreviewResponse
+    report: BaziReport
+    metadata: ReportMetadata
+    debug_trace: AgentDebugTrace

@@ -28,31 +28,25 @@ services:
       APP_ENV: development
       DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql+asyncpg://tianxu:tianxu_dev_password@postgres:5432/tianxu}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
-      MODEL_PROVIDER: ${MODEL_PROVIDER:-disabled}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      MODEL_SETTINGS_ENABLED: ${MODEL_SETTINGS_ENABLED:-true}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      APP_ENCRYPTION_KEY_VERSION: ${APP_ENCRYPTION_KEY_VERSION:-v1}
       WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini:ro
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
     command:
-      - uv
-      - run
-      - --no-sync
-      - uvicorn
-      - app.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --reload
-      - --reload-dir
-      - /app/app
-      - --reload-delay
-      - "0.5"
+      - sh
+      - -c
+      - >-
+        uv run --no-sync alembic upgrade head &&
+        exec uv run --no-sync uvicorn app.main:app
+        --host 0.0.0.0 --port 8000 --reload
+        --reload-dir /app/app --reload-delay 0.5
     depends_on:
       postgres:
         condition: service_healthy
