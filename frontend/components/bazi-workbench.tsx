@@ -1249,7 +1249,6 @@ function ReportGenerator({
           <span className="report-icon"><FileText size={19} aria-hidden="true" /></span>
           <div>
             <h3 id="report-title">八字分析报告</h3>
-            <p>由模型基于当前命盘生成八个固定章节，不含知识库或古籍引文。</p>
           </div>
         </div>
         <button className="report-button" type="button" onClick={handleGenerate} disabled={isGenerating}>

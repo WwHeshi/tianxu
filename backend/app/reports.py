@@ -15,11 +15,15 @@ from .schemas import (
     AnnualFortune,
     BaziReport,
     BigLuckPeriod,
+    BranchComponent,
     ChartPreviewResponse,
+    Component,
+    FortunePillar,
     MonthlyFortune,
+    Pillar,
 )
 
-PROMPT_VERSION = "bazi-report-v3"
+PROMPT_VERSION = "bazi-report-v10"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0
@@ -32,7 +36,7 @@ REPORT_JSON_SCHEMA = {
 }
 
 REPORT_INSTRUCTIONS = """你是八字命盘报告撰写助手。
-输入中的四柱、十神、藏干、五行分布、神煞和运势周期都由确定性排盘引擎计算完成。
+输入中的四柱、十神、藏干、神煞和运势周期都由确定性排盘引擎计算完成。
 
 必须遵守：
 1. 只能解释输入数据，不得重新排盘，不得改写或质疑四柱。
@@ -41,13 +45,15 @@ REPORT_INSTRUCTIONS = """你是八字命盘报告撰写助手。
 4. 不作疾病诊断、寿命判断、灾祸断言，不给出确定性的法律、投资或医疗建议。
 5. 每一节应具体对应输入命盘，避免空泛套话；若数据不足，应直接说明局限。
 6. 当前运势只讨论输入给出的当前大运、流年、流月，不推测未提供的完整时间线。
-7. 严格返回指定 JSON 结构，不添加其他字段。"""
+7. auxiliary_shen_sha 仅作辅助参考，不得依据单一神煞作吉凶断言。
+8. 明确区分输入中的确定性事实与基于事实的传统解释，不得声称引擎已经计算输入未提供的结论。
+9. 严格返回指定 JSON 结构，不添加其他字段。"""
 
 CHAT_COMPLETIONS_OUTPUT_INSTRUCTIONS = """
 
 请只输出一个合法的 JSON 对象，不要输出 Markdown 代码块、解释文字或其他内容。
 JSON 对象必须且只能包含以下 8 个字段；所有字段均为非空字符串，不得遗漏、改名或增加字段：
-- chart_overview：命盘整体概述，包括日主、五行分布与总体特征。
+- chart_overview：命盘整体概述，包括日主、四柱结构、十神配置与总体特征。
 - temperament：性格倾向与行为模式。
 - career：事业方向、工作特点与发展倾向。
 - finance：财运特点与风险倾向。
@@ -174,6 +180,119 @@ def _select_month(annual: AnnualFortune, now: datetime) -> MonthlyFortune | None
     )
 
 
+YIN_YANG_LABEL = {"yang": "阳", "yin": "阴"}
+GENDER_LABEL = {"male": "男", "female": "女", "other": "其他"}
+BIG_LUCK_DIRECTION_LABEL = {"forward": "顺排", "backward": "逆排"}
+
+
+def _component_context(component: Component) -> dict[str, Any]:
+    return {
+        "symbol": component.symbol,
+        "element": component.element,
+        "yin_yang": YIN_YANG_LABEL[component.polarity],
+        "ten_god": component.ten_god,
+    }
+
+
+def _branch_context(branch: BranchComponent) -> dict[str, Any]:
+    hidden_stems: list[dict[str, Any]] = []
+    for position, stem in enumerate(branch.hidden_stems, start=1):
+        hidden_stems.append(
+            {
+                **_component_context(stem),
+                "position": position,
+                "is_main_qi": position == 1,
+            }
+        )
+    return {
+        "symbol": branch.symbol,
+        "primary_element": branch.element,
+        "yin_yang": YIN_YANG_LABEL[branch.polarity],
+        "hidden_stems": hidden_stems,
+    }
+
+
+def _pillar_context(pillar: Pillar) -> dict[str, Any]:
+    return {
+        "gan_zhi": pillar.gan_zhi,
+        "heavenly_stem": _component_context(pillar.heavenly_stem),
+        "earthly_branch": _branch_context(pillar.earthly_branch),
+        "day_master_growth_stage": pillar.growth_stage,
+        "pillar_stem_growth_stage": pillar.self_growth_stage,
+        "pillar_xun_void_branches": list(pillar.xun_kong),
+        "na_yin": pillar.na_yin,
+        "auxiliary_shen_sha": pillar.shen_sha,
+    }
+
+
+def _fortune_pillar_context(pillar: FortunePillar | None) -> dict[str, Any] | None:
+    if pillar is None:
+        return None
+    branch = pillar.earthly_branch
+    return {
+        "gan_zhi": pillar.gan_zhi,
+        "heavenly_stem": _component_context(pillar.heavenly_stem),
+        "earthly_branch": {
+            "symbol": branch.symbol,
+            "primary_element": branch.element,
+            "yin_yang": YIN_YANG_LABEL[branch.polarity],
+            "main_qi_ten_god": branch.ten_god,
+        },
+    }
+
+
+def _current_fortune_context(
+    *,
+    chart: ChartPreviewResponse,
+    current_time: datetime,
+) -> dict[str, Any] | None:
+    cycles = chart.chart.fortune_cycles
+    if cycles is None:
+        return None
+
+    period = _select_period(cycles.big_luck_periods, current_time)
+    annual = _select_annual(period, current_time) if period else None
+    month = _select_month(annual, current_time) if annual else None
+
+    current_big_luck = None
+    if period is not None:
+        current_big_luck = {
+            "phase": "起运前" if period.is_before_start else "行运中",
+            "effective_from": period.start_solar_datetime.isoformat(),
+            "effective_until_exclusive": period.end_solar_datetime.isoformat(),
+            "pillar": _fortune_pillar_context(period.pillar),
+        }
+
+    current_annual = None
+    if annual is not None:
+        current_annual = {
+            "year": annual.year,
+            "nominal_age_sui": annual.nominal_age,
+            "effective_from": annual.segment_start_solar_datetime.isoformat(),
+            "effective_until_exclusive": annual.segment_end_solar_datetime.isoformat(),
+            "pillar": _fortune_pillar_context(annual.pillar),
+        }
+
+    current_month = None
+    if month is not None:
+        current_month = {
+            "boundary_solar_term": month.solar_term,
+            "solar_month_started_at": month.start_solar_datetime.isoformat(),
+            "effective_from": month.segment_start_solar_datetime.isoformat(),
+            "effective_until_exclusive": month.segment_end_solar_datetime.isoformat(),
+            "pillar": _fortune_pillar_context(month.pillar),
+        }
+
+    return {
+        "as_of_beijing_datetime": current_time.isoformat(timespec="seconds"),
+        "big_luck_sequence_direction": BIG_LUCK_DIRECTION_LABEL[cycles.direction],
+        "first_big_luck_start_datetime": cycles.start_solar_datetime.isoformat(),
+        "current_big_luck": current_big_luck,
+        "current_annual": current_annual,
+        "current_month": current_month,
+    }
+
+
 def build_report_context(
     chart: ChartPreviewResponse,
     *,
@@ -182,43 +301,25 @@ def build_report_context(
     """Build a compact context and intentionally omit the full fortune timeline."""
 
     current_time = now or datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
-    fortune: dict[str, Any] | None = None
-    cycles = chart.chart.fortune_cycles
-    if cycles is not None:
-        period = _select_period(cycles.big_luck_periods, current_time)
-        annual = _select_annual(period, current_time) if period else None
-        month = _select_month(annual, current_time) if annual else None
-        fortune = {
-            "as_of_beijing_time": current_time.isoformat(timespec="seconds"),
-            "direction": cycles.direction,
-            "fortune_start": cycles.start_solar_datetime.isoformat(),
-            "current_big_luck": (
-                period.model_dump(mode="json", exclude={"years"}) if period else None
-            ),
-            "current_annual": (
-                annual.model_dump(mode="json", exclude={"months"}) if annual else None
-            ),
-            "current_month": month.model_dump(mode="json") if month else None,
-        }
-
     return {
-        "context_version": "v1",
-        "interpretation_scope": "traditional_bazi_cultural_reference",
-        "normalized_input": {
-            "beijing_datetime": chart.normalized_input.beijing_datetime.isoformat(),
-            "true_solar_datetime": chart.normalized_input.true_solar_datetime.isoformat(),
-            "calendar_type": chart.normalized_input.calendar_type,
-            "gender": chart.normalized_input.gender,
+        "birth": {
+            "input_beijing_datetime": chart.normalized_input.beijing_datetime.isoformat(),
+            "effective_chart_datetime": chart.chart.calendar.solar_datetime.isoformat(),
+            "chart_time_basis": (
+                "真太阳时" if chart.solar_time_adjustment is not None else "北京时间"
+            ),
+            "gender": GENDER_LABEL[chart.normalized_input.gender.value],
         },
-        "calendar": chart.chart.calendar.model_dump(mode="json"),
-        "pillars": chart.chart.pillars.model_dump(mode="json"),
-        "day_master": chart.chart.day_master.model_dump(mode="json"),
-        "element_distribution": chart.chart.element_distribution.model_dump(mode="json"),
-        "current_fortune": fortune,
-        "calculation_policy": chart.calculation_policy.model_dump(mode="json"),
-        "engine": chart.engine.model_dump(mode="json"),
-        "warnings": chart.warnings,
-        "limitations": chart.limitations,
+        "pillars": {
+            "year": _pillar_context(chart.chart.pillars.year),
+            "month": _pillar_context(chart.chart.pillars.month),
+            "day": _pillar_context(chart.chart.pillars.day),
+            "hour": _pillar_context(chart.chart.pillars.hour),
+        },
+        "current_fortune": _current_fortune_context(
+            chart=chart,
+            current_time=current_time,
+        ),
     }
 
 

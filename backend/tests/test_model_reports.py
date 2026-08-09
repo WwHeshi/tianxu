@@ -216,7 +216,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v3"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v10"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
         "chart",
@@ -237,10 +237,45 @@ def test_report_context_omits_full_fortune_timeline() -> None:
 
     serialized = str(context)
     assert "big_luck_periods" not in serialized
+    assert set(context) == {
+        "birth",
+        "pillars",
+        "current_fortune",
+    }
+    assert context["birth"] == {
+        "input_beijing_datetime": "1990-01-01T12:00:00",
+        "effective_chart_datetime": "1990-01-01T11:30:33",
+        "chart_time_basis": "真太阳时",
+        "gender": "男",
+    }
+    year = context["pillars"]["year"]
+    assert "name" not in year
+    assert "growth_stage" not in year
+    assert year["day_master_growth_stage"] == "临官"
+    assert year["pillar_stem_growth_stage"] == "帝旺"
+    assert year["heavenly_stem"]["yin_yang"] == "阴"
+    assert "polarity" not in year["heavenly_stem"]
+    assert year["earthly_branch"]["primary_element"] == "火"
+    assert year["earthly_branch"]["hidden_stems"][0]["is_main_qi"] is True
+    assert year["earthly_branch"]["hidden_stems"][0]["position"] == 1
     current = context["current_fortune"]
     assert isinstance(current, dict)
-    assert "years" not in current["current_big_luck"]
-    assert "months" not in current["current_annual"]
+    assert current["big_luck_sequence_direction"] == "逆排"
+    assert set(current["current_big_luck"]) == {
+        "phase",
+        "effective_from",
+        "effective_until_exclusive",
+        "pillar",
+    }
+    assert set(current["current_annual"]) == {
+        "year",
+        "nominal_age_sui",
+        "effective_from",
+        "effective_until_exclusive",
+        "pillar",
+    }
+    assert "index" not in serialized
+    assert "transition" not in serialized
 
 
 @pytest.mark.asyncio
@@ -285,8 +320,14 @@ async def test_model_request_is_one_shot_structured_and_has_no_tools() -> None:
 
     assert execution.report.chart_overview == "命盘概览内容"
     assert "output" in execution.raw_response
-    assert execution.context["context_version"] == "v1"
-    assert '\n  "context_version": "v1"' in execution.user_prompt
+    assert "normalized_input" not in execution.context
+    assert "calendar" not in execution.context
+    assert "element_distribution" not in execution.context
+    assert "calculation_policy" not in execution.context
+    assert "engine" not in execution.context
+    assert "limitations" not in execution.context
+    assert "day_master" not in execution.context
+    assert "chart_reliability_warnings" not in execution.context
     assert len(requests) == 1
     body = requests[0].read().decode()
     assert '"type":"json_schema"' in body
@@ -343,6 +384,7 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     assert "必须且只能包含以下 8 个字段" in body
     assert "chart_overview：命盘整体概述" in body
     assert "不要输出 Markdown 代码块" in body
+    assert "auxiliary_shen_sha 仅作辅助参考" in body
     assert '"tools"' not in body
     assert "big_luck_periods" not in body
 
