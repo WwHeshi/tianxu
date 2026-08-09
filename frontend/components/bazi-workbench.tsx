@@ -1161,14 +1161,16 @@ function AgentDebugModal({
               <h4 id="agent-debug-title">Agent 执行链路</h4>
             </div>
             <div className="agent-debug-heading-actions">
-              <span>Trace {trace.trace_version}</span>
               <button className="icon-button" type="button" onClick={onClose} aria-label="关闭执行链路">
                 <X size={17} aria-hidden="true" />
               </button>
             </div>
           </div>
-          <p className="agent-debug-privacy"><Info size={14} aria-hidden="true" /> {trace.privacy_note}</p>
-
+          <dl className="agent-trace-meta">
+            <div><dt>协议</dt><dd>{protocolLabel}</dd></div>
+            <div><dt>模型</dt><dd title={trace.request.model}>{trace.request.model}</dd></div>
+            <div><dt>地址</dt><dd title={trace.request.endpoint}>{trace.request.endpoint}</dd></div>
+          </dl>
           <ol className="agent-trace-timeline">
             {trace.steps.map((step, index) => (
               <li key={step.id} data-category={step.category}>
@@ -1195,24 +1197,12 @@ function AgentDebugModal({
               <pre>{trace.user_prompt}</pre>
             </details>
             <details>
-              <summary>模型上下文 JSON</summary>
-              <pre>{JSON.stringify(trace.context, null, 2)}</pre>
-            </details>
-            <details>
               <summary>模型请求快照</summary>
-              <dl className="agent-request-meta">
-                <div><dt>协议</dt><dd>{protocolLabel}</dd></div>
-                <div><dt>模型</dt><dd>{trace.request.model}</dd></div>
-                <div><dt>地址</dt><dd>{trace.request.endpoint}</dd></div>
-                <div><dt>工具</dt><dd>{trace.request.tools_enabled ? "开启" : "关闭"}</dd></div>
-                <div><dt>历史</dt><dd>{trace.request.conversation_history ? "包含" : "不包含"}</dd></div>
-                <div><dt>输出约束</dt><dd>{trace.request.response_format}</dd></div>
-              </dl>
               <pre>{JSON.stringify(trace.request.body, null, 2)}</pre>
             </details>
             <details>
-              <summary>输出 Schema</summary>
-              <pre>{JSON.stringify(trace.output_schema, null, 2)}</pre>
+              <summary>模型原始响应</summary>
+              <pre>{JSON.stringify(trace.raw_response, null, 2)}</pre>
             </details>
           </div>
 
@@ -1302,7 +1292,10 @@ function ReportGenerator({
             </button>
           </header>
           {traceOpen && (
-            <AgentDebugModal trace={result.debug_trace} onClose={() => setTraceOpen(false)} />
+            <AgentDebugModal
+              trace={result.debug_trace}
+              onClose={() => setTraceOpen(false)}
+            />
           )}
           <div className="report-sections">
             {REPORT_SECTIONS.map((section, index) => (
@@ -1316,7 +1309,7 @@ function ReportGenerator({
             ))}
           </div>
           <footer>
-            本报告属于传统文化视角下的模型生成内容，仅供参考 · 提示词 {result.metadata.prompt_version}
+            本报告属于传统文化视角下的模型生成内容，仅供参考
           </footer>
         </article>
       )}

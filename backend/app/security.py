@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .config import app_environment
 
 DEVELOPMENT_MASTER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+CREDENTIAL_ENCRYPTION_VERSION = "v1"
 
 
 class SecretEncryptionError(RuntimeError):

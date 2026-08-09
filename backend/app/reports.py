@@ -19,7 +19,7 @@ from .schemas import (
     MonthlyFortune,
 )
 
-PROMPT_VERSION = "bazi-report-v1"
+PROMPT_VERSION = "bazi-report-v2"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0
@@ -43,6 +43,21 @@ REPORT_INSTRUCTIONS = """你是八字命盘报告撰写助手。
 6. 当前运势只讨论输入给出的当前大运、流年、流月，不推测未提供的完整时间线。
 7. 严格返回指定 JSON 结构，不添加其他字段。"""
 
+CHAT_COMPLETIONS_OUTPUT_INSTRUCTIONS = """
+
+请只输出一个合法的 JSON 对象，不要输出 Markdown 代码块、解释文字或其他内容。
+JSON 对象必须且只能包含以下 8 个字段；所有字段均为非空字符串，不得遗漏、改名或增加字段：
+- chart_overview：命盘整体概述，包括日主、五行分布与总体特征。
+- temperament：性格倾向与行为模式。
+- career：事业方向、工作特点与发展倾向。
+- finance：财运特点与风险倾向。
+- relationships：婚恋、人际关系与相处倾向。
+- current_fortune：结合输入提供的当前大运、流年和流月分析当前阶段。
+- recommendations：给出克制、具体、可执行的建议。
+- limitations：说明本次分析的数据边界、不确定性与传统文化参考属性。
+所有结论只能依据提供的命盘上下文；资料不足时应明确说明，不得虚构命盘数据。
+字段值中不要嵌套 JSON。"""
+
 
 class ModelProviderError(RuntimeError):
     """A safe-to-display model-provider failure without upstream secrets or payloads."""
@@ -56,7 +71,7 @@ class ReportGenerationResult:
     user_prompt: str
     endpoint: str
     request_body: dict[str, Any]
-    response_format: str
+    raw_response: dict[str, Any]
     model_latency_ms: int
 
 
@@ -267,7 +282,6 @@ async def generate_structured_report(
     if credential.api_protocol == "responses":
         url = f"{credential.base_url.rstrip('/')}/responses"
         system_prompt = REPORT_INSTRUCTIONS
-        response_format = "json_schema"
         request_body = {
             "model": credential.model,
             "instructions": system_prompt,
@@ -285,11 +299,7 @@ async def generate_structured_report(
         }
     elif credential.api_protocol == "chat_completions":
         url = f"{credential.base_url.rstrip('/')}/chat/completions"
-        field_names = "、".join(REPORT_FIELDS)
-        system_prompt = REPORT_INSTRUCTIONS + (
-            f"\n只返回一个 JSON 对象，必须包含这些字符串字段：{field_names}。"
-        )
-        response_format = "prompted_json"
+        system_prompt = REPORT_INSTRUCTIONS + CHAT_COMPLETIONS_OUTPUT_INSTRUCTIONS
         request_body = {
             "model": credential.model,
             "messages": [
@@ -331,6 +341,8 @@ async def generate_structured_report(
 
     try:
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("model response must be a JSON object")
         output_text = (
             _extract_responses_output_text(payload)
             if credential.api_protocol == "responses"
@@ -347,6 +359,6 @@ async def generate_structured_report(
         user_prompt=context_text,
         endpoint=url,
         request_body=request_body,
-        response_format=response_format,
+        raw_response=payload,
         model_latency_ms=model_latency_ms,
     )

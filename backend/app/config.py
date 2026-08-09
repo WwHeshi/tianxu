@@ -14,13 +14,4 @@ def app_environment() -> str:
 
 
 def model_settings_enabled() -> bool:
-    if app_environment() not in {"development", "local", "test"}:
-        return False
-    configured = os.getenv("MODEL_SETTINGS_ENABLED")
-    if configured is not None:
-        return configured.strip().lower() in {"1", "true", "yes", "on"}
-    return True
-
-
-def encryption_key_version() -> str:
-    return os.getenv("APP_ENCRYPTION_KEY_VERSION", "v1").strip() or "v1"
+    return app_environment() in {"development", "local", "test"}

@@ -28,9 +28,7 @@ services:
       APP_ENV: development
       DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql+asyncpg://tianxu:tianxu_dev_password@postgres:5432/tianxu}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
-      MODEL_SETTINGS_ENABLED: ${MODEL_SETTINGS_ENABLED:-true}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
-      APP_ENCRYPTION_KEY_VERSION: ${APP_ENCRYPTION_KEY_VERSION:-v1}
       WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "${BACKEND_PORT:-8000}:8000"

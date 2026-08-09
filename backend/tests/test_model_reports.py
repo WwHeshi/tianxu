@@ -77,7 +77,6 @@ async def api_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[tuple[AsyncClient, FakeCredentialRepository]]:
     monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("MODEL_SETTINGS_ENABLED", "true")
     monkeypatch.setenv("APP_ENCRYPTION_KEY", MASTER_KEY)
     repository = FakeCredentialRepository()
     app.dependency_overrides[get_credential_repository] = lambda: repository
@@ -205,7 +204,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
             user_prompt="user prompt",
             endpoint="https://api.openai.com/v1/responses",
             request_body={"model": "test-model", "input": "user prompt"},
-            response_format="json_schema",
+            raw_response={"output_text": sample_report().model_dump_json()},
             model_latency_ms=12,
         )
 
@@ -217,7 +216,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v1"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v2"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
         "chart",
@@ -226,7 +225,6 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
         "model",
         "validation",
     ]
-    assert data["debug_trace"]["request"]["tools_enabled"] is False
     assert data["debug_trace"]["system_prompt"] == "system prompt"
     assert "sk-test-super-secret-6789" not in response.text
     assert captured["api_key"] == "sk-test-super-secret-6789"
@@ -286,7 +284,7 @@ async def test_model_request_is_one_shot_structured_and_has_no_tools() -> None:
     )
 
     assert execution.report.chart_overview == "命盘概览内容"
-    assert execution.response_format == "json_schema"
+    assert "output" in execution.raw_response
     assert execution.context["context_version"] == "v1"
     assert len(requests) == 1
     body = requests[0].read().decode()
@@ -336,11 +334,14 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     )
 
     assert execution.report.chart_overview == "命盘概览内容"
-    assert execution.response_format == "prompted_json"
+    assert "choices" in execution.raw_response
     assert len(requests) == 1
     assert requests[0].url.path == "/api/paas/v4/chat/completions"
     body = requests[0].read().decode()
     assert '"messages"' in body
+    assert "必须且只能包含以下 8 个字段" in body
+    assert "chart_overview：命盘整体概述" in body
+    assert "不要输出 Markdown 代码块" in body
     assert '"tools"' not in body
     assert "big_luck_periods" not in body
 
@@ -398,10 +399,9 @@ def test_secret_cipher_detects_tampering(monkeypatch: pytest.MonkeyPatch) -> Non
         cipher.decrypt(tampered, scope=LOCAL_CREDENTIAL_SCOPE, key_version="v1")
 
 
-def test_model_access_cannot_be_enabled_without_auth_in_production(
+def test_model_access_is_disabled_without_auth_in_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("MODEL_SETTINGS_ENABLED", "true")
 
     assert model_settings_enabled() is False

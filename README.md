@@ -80,7 +80,7 @@ npm run dev
 
 非 Docker 启动前需要提供可用的 `DATABASE_URL` 和 `APP_ENCRYPTION_KEY`。前者用于 PostgreSQL，后者必须是 Base64 编码的 32 字节随机值。模型 API 密钥不放在环境变量中：在页面右上角设置后，后端用 AES-GCM 加密并保存到 PostgreSQL，只向浏览器返回配置状态和末四位。
 
-当前没有用户认证，因此 `MODEL_SETTINGS_ENABLED` 默认只在 `development`、`local` 和 `test` 环境开放；生产环境必须保持关闭，直到接入用户身份和授权校验。
+当前没有用户认证，因此模型设置和报告能力只在 `development`、`local` 和 `test` 环境开放；生产环境由代码强制关闭，直到接入用户身份和授权校验。
 
 ## 目录约定
 

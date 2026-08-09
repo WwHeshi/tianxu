@@ -376,23 +376,17 @@ class AgentRequestDebug(BaseModel):
     provider: str
     api_protocol: ApiProtocol
     model: str
-    tools_enabled: Literal[False]
-    conversation_history: Literal[False]
     request_count: Literal[1]
-    response_format: Literal["json_schema", "prompted_json"]
     body: dict[str, Any]
 
 
 class AgentDebugTrace(BaseModel):
-    trace_version: Literal["v1"]
     steps: list[AgentTraceStep]
     system_prompt: str
     user_prompt: str
-    context: dict[str, Any]
     request: AgentRequestDebug
-    output_schema: dict[str, Any]
+    raw_response: dict[str, Any]
     redacted: list[str]
-    privacy_note: str
 
 
 class ReportGenerationResponse(BaseModel):

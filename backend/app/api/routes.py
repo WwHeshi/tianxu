@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ..bazi.engine import ENGINE_VERSION, ChartCalculationError, calculate_chart
 from ..bazi.locations import LocationDataError, validate_location_data
-from ..config import app_environment, encryption_key_version, model_settings_enabled
+from ..config import app_environment, model_settings_enabled
 from ..credentials import (
     LOCAL_CREDENTIAL_SCOPE,
     ModelCredentialRepository,
@@ -17,7 +17,6 @@ from ..credentials import (
 from ..models import ModelCredential
 from ..reports import (
     PROMPT_VERSION,
-    REPORT_JSON_SCHEMA,
     REPORT_SCHEMA_VERSION,
     ModelProviderError,
     generate_structured_report,
@@ -37,7 +36,7 @@ from ..schemas import (
     ReportGenerationResponse,
     ReportMetadata,
 )
-from ..security import SecretCipher, SecretEncryptionError
+from ..security import CREDENTIAL_ENCRYPTION_VERSION, SecretCipher, SecretEncryptionError
 
 router = APIRouter(prefix="/api/v1")
 CredentialRepositoryDependency = Annotated[
@@ -150,7 +149,7 @@ async def put_model_settings(
     api_key = payload.api_key.get_secret_value().strip()
     if len(api_key) < 8:
         raise HTTPException(status_code=422, detail="API 密钥长度不足")
-    key_version = encryption_key_version()
+    key_version = CREDENTIAL_ENCRYPTION_VERSION
     try:
         encrypted = SecretCipher.from_environment().encrypt(
             api_key,
@@ -277,7 +276,6 @@ async def generate_report(
             engine_version=ENGINE_VERSION,
         ),
         debug_trace=AgentDebugTrace(
-            trace_version="v1",
             steps=[
                 AgentTraceStep(
                     id="chart",
@@ -319,21 +317,16 @@ async def generate_report(
             ],
             system_prompt=execution.system_prompt,
             user_prompt=execution.user_prompt,
-            context=execution.context,
             request=AgentRequestDebug(
                 method="POST",
                 endpoint=execution.endpoint,
                 provider=credential.provider,
                 api_protocol=credential.api_protocol,
                 model=credential.model,
-                tools_enabled=False,
-                conversation_history=False,
                 request_count=1,
-                response_format=execution.response_format,
                 body=execution.request_body,
             ),
-            output_schema=REPORT_JSON_SCHEMA,
-            redacted=["API 密钥", "Authorization 请求头", "上游原始响应"],
-            privacy_note="调试信息包含出生与命盘上下文，仅用于本地开发排查。",
+            raw_response=execution.raw_response,
+            redacted=["API 密钥", "Authorization 请求头"],
         ),
     )

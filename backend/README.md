@@ -26,8 +26,8 @@ uv run pytest
 - `DELETE /api/v1/model-settings`
 - `POST /api/v1/reports/generate`
 
-`model-settings` 端点由服务端环境变量 `MODEL_SETTINGS_ENABLED` 控制。当前没有用户认证，
-只应在本地开发环境开放。模型 API 密钥使用 `APP_ENCRYPTION_KEY`（Base64 编码的 32 字节
+当前没有用户认证，`model-settings` 和报告端点只在开发、本地和测试环境开放，生产环境
+由代码强制关闭。模型 API 密钥使用 `APP_ENCRYPTION_KEY`（Base64 编码的 32 字节
 主密钥）进行 AES-GCM 加密；数据库只保存密文、末四位和模型连接元数据，GET 响应不返回
 明文密钥。
 

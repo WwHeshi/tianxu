@@ -262,26 +262,20 @@ export interface AgentTraceStep {
 }
 
 export interface AgentDebugTrace {
-  trace_version: "v1";
   steps: AgentTraceStep[];
   system_prompt: string;
   user_prompt: string;
-  context: Record<string, unknown>;
   request: {
     method: "POST";
     endpoint: string;
     provider: string;
     api_protocol: ModelApiProtocol;
     model: string;
-    tools_enabled: false;
-    conversation_history: false;
     request_count: 1;
-    response_format: "json_schema" | "prompted_json";
     body: Record<string, unknown>;
   };
-  output_schema: Record<string, unknown>;
+  raw_response: Record<string, unknown>;
   redacted: string[];
-  privacy_note: string;
 }
 
 export interface ReportGenerationResponse {

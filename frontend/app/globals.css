@@ -270,10 +270,12 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .agent-debug-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .agent-debug-heading h4 { margin: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-size: 18px; }
 .agent-debug-heading-actions { display: flex; align-items: center; gap: 9px; }
-.agent-debug-heading-actions > span { padding: 3px 7px; color: var(--quiet); background: var(--surface); border: 1px solid var(--line); border-radius: 99px; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 9px; }
 .agent-debug-heading-actions .icon-button { width: 34px; height: 34px; background: var(--surface); }
-.agent-debug-privacy { display: flex; align-items: flex-start; gap: 7px; margin: 13px 0 20px; padding: 10px 12px; color: #755823; background: #faf4e6; border-left: 3px solid #bd812e; font-size: 10px; }
-.agent-debug-privacy svg { flex: 0 0 auto; margin-top: 1px; }
+.agent-trace-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 16px 0 24px; padding: 0; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+.agent-trace-meta > div { min-width: 0; padding: 10px 12px; border-right: 1px solid var(--line); }
+.agent-trace-meta > div:last-child { border-right: 0; }
+.agent-trace-meta dt { color: var(--quiet); font-size: 9px; }
+.agent-trace-meta dd { margin: 2px 0 0; overflow: hidden; color: var(--ink); font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .agent-trace-timeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 0 0 20px; padding: 0; list-style: none; }
 .agent-trace-timeline li { position: relative; min-width: 0; text-align: center; }
 .agent-trace-timeline li:not(:last-child)::after { position: absolute; z-index: 0; top: 14px; left: calc(50% + 18px); width: calc(100% - 26px); height: 1px; background: #b8cec8; content: ""; }
@@ -290,11 +292,6 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .agent-debug-details summary::after { position: absolute; top: 9px; right: 13px; color: var(--quiet); content: "+"; font-size: 14px; font-weight: 400; }
 .agent-debug-details details[open] summary::after { content: "−"; }
 .agent-debug-details pre { max-height: 360px; overflow: auto; margin: 0; padding: 14px; color: #dce7e3; background: #182623; border-top: 1px solid var(--line); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 10px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-request-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 12px 14px; border-top: 1px solid var(--line); }
-.agent-request-meta > div { min-width: 0; padding: 7px 10px; border-right: 1px solid var(--line); }
-.agent-request-meta > div:nth-child(3n) { border-right: 0; }
-.agent-request-meta dt { color: var(--quiet); font-size: 9px; }
-.agent-request-meta dd { margin: 2px 0 0; overflow-wrap: anywhere; color: var(--ink); font-size: 10px; font-weight: 650; }
 .agent-debug-redacted { margin: 10px 0 0; color: var(--quiet); text-align: right; font-size: 9px; }
 .report-sections { padding: 3px 26px; }
 .report-sections > section { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 15px; padding: 22px 0; border-bottom: 1px solid var(--line); }
@@ -369,9 +366,9 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
   .agent-trace-marker { margin: 0; }
   .agent-trace-title { display: flex; align-items: baseline; justify-content: flex-start; gap: 7px; }
   .agent-trace-timeline li p { margin: 3px 0 0; }
-  .agent-request-meta { grid-template-columns: 1fr; }
-  .agent-request-meta > div, .agent-request-meta > div:nth-child(3n) { border-right: 0; border-bottom: 1px solid var(--line); }
-  .agent-request-meta > div:last-child { border-bottom: 0; }
+  .agent-trace-meta { grid-template-columns: 1fr; }
+  .agent-trace-meta > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .agent-trace-meta > div:last-child { border-bottom: 0; }
   .report-sections { padding: 0 18px; }
   .report-sections > section { grid-template-columns: 26px minmax(0, 1fr); gap: 9px; padding: 18px 0; }
   .generated-report > footer { padding: 11px 18px; }
