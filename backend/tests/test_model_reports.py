@@ -216,7 +216,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v2"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v3"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
         "chart",
@@ -286,6 +286,7 @@ async def test_model_request_is_one_shot_structured_and_has_no_tools() -> None:
     assert execution.report.chart_overview == "命盘概览内容"
     assert "output" in execution.raw_response
     assert execution.context["context_version"] == "v1"
+    assert '\n  "context_version": "v1"' in execution.user_prompt
     assert len(requests) == 1
     body = requests[0].read().decode()
     assert '"type":"json_schema"' in body

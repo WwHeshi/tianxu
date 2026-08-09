@@ -327,7 +327,6 @@ export function BaziWorkbench() {
               <p className="eyebrow">BIRTH PROFILE</p>
               <h1 id="input-title">输入出生信息</h1>
             </div>
-            <span className="step-badge">01 / 01</span>
           </div>
           <p className="panel-intro">选择出生地点后，系统会根据出生区县校正为真太阳时。</p>
 

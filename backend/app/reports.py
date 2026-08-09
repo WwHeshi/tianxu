@@ -19,7 +19,7 @@ from .schemas import (
     MonthlyFortune,
 )
 
-PROMPT_VERSION = "bazi-report-v2"
+PROMPT_VERSION = "bazi-report-v3"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0
@@ -277,7 +277,7 @@ async def generate_structured_report(
 ) -> ReportGenerationResult:
     context = build_report_context(chart)
     context_text = "请根据以下确定性命盘 JSON 生成固定结构报告：\n" + json.dumps(
-        context, ensure_ascii=False, separators=(",", ":")
+        context, ensure_ascii=False, indent=2
     )
     if credential.api_protocol == "responses":
         url = f"{credential.base_url.rstrip('/')}/responses"
