@@ -11,7 +11,3 @@ def database_url() -> str:
 
 def app_environment() -> str:
     return os.getenv("APP_ENV", "development").strip().lower()
-
-
-def model_settings_enabled() -> bool:
-    return app_environment() in {"development", "local", "test"}

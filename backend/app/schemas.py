@@ -3,6 +3,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
@@ -365,7 +366,7 @@ class AgentTraceStep(BaseModel):
     id: str
     title: str
     category: Literal["deterministic", "context", "prompt", "model", "validation"]
-    status: Literal["completed"]
+    status: Literal["completed", "failed"]
     detail: str
     duration_ms: int | None = None
 
@@ -393,4 +394,129 @@ class ReportGenerationResponse(BaseModel):
     chart: ChartPreviewResponse
     report: BaziReport
     metadata: ReportMetadata
-    debug_trace: AgentDebugTrace
+    debug_trace: AgentDebugTrace | None = None
+
+
+UserRole = Literal["user", "admin"]
+UserStatus = Literal["active", "disabled"]
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.@+-]+$")
+    password: SecretStr = Field(min_length=8, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: SecretStr = Field(min_length=8, max_length=128)
+    new_password: SecretStr = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def require_different_password(self) -> "ChangePasswordRequest":
+        if self.current_password.get_secret_value() == self.new_password.get_secret_value():
+            raise ValueError("新密码不能与当前密码相同")
+        return self
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    username: str
+    display_name: str
+    role: UserRole
+    status: UserStatus
+    must_change_password: bool
+    last_login_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LoginResponse(BaseModel):
+    user: UserResponse
+
+
+class BootstrapStatusResponse(BaseModel):
+    required: bool
+
+
+class BootstrapAdminRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.@+-]+$")
+    display_name: str = Field(min_length=1, max_length=80)
+    password: SecretStr = Field(min_length=8, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("display_name")
+    @classmethod
+    def strip_display_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("显示名称不能为空")
+        return stripped
+
+
+class AdminUserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.@+-]+$")
+    display_name: str = Field(min_length=1, max_length=80)
+    temporary_password: SecretStr = Field(min_length=8, max_length=128)
+    role: UserRole = "user"
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("display_name")
+    @classmethod
+    def strip_display_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("显示名称不能为空")
+        return stripped
+
+
+class AdminUserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    role: UserRole | None = None
+    status: UserStatus | None = None
+
+    @field_validator("display_name")
+    @classmethod
+    def strip_optional_display_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("显示名称不能为空")
+        return stripped
+
+
+class AdminPasswordReset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_password: SecretStr = Field(min_length=8, max_length=128)
+
+
+class UserListResponse(BaseModel):
+    items: list[UserResponse]
+    total: int
+    offset: int
+    limit: int

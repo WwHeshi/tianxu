@@ -69,6 +69,29 @@ class ModelProviderError(RuntimeError):
     """A safe-to-display model-provider failure without upstream secrets or payloads."""
 
 
+class ModelOutputFormatError(ModelProviderError):
+    """A model response that can be inspected safely but failed report validation."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        endpoint: str,
+        request_body: dict[str, Any],
+        raw_response: dict[str, Any],
+        model_latency_ms: int,
+    ) -> None:
+        super().__init__(message)
+        self.system_prompt = system_prompt
+        self.user_prompt = user_prompt
+        self.endpoint = endpoint
+        self.request_body = request_body
+        self.raw_response = raw_response
+        self.model_latency_ms = model_latency_ms
+
+
 @dataclass(frozen=True)
 class ReportGenerationResult:
     report: BaziReport
@@ -440,10 +463,13 @@ async def generate_structured_report(
     if not response.is_success:
         raise ModelProviderError(f"模型服务调用失败（HTTP {response.status_code}）。")
 
+    raw_response: dict[str, Any] = {"unparsed_response": response.text[:50_000]}
     try:
-        payload = response.json()
-        if not isinstance(payload, dict):
+        parsed_payload = response.json()
+        if not isinstance(parsed_payload, dict):
             raise ValueError("model response must be a JSON object")
+        payload = parsed_payload
+        raw_response = payload
         output_text = (
             _extract_responses_output_text(payload)
             if credential.api_protocol == "responses"
@@ -451,8 +477,26 @@ async def generate_structured_report(
         )
         raw_report = _parse_report_json(output_text)
         report = BaziReport.model_validate(raw_report)
+    except ModelProviderError as exc:
+        raise ModelOutputFormatError(
+            str(exc),
+            system_prompt=system_prompt,
+            user_prompt=context_text,
+            endpoint=url,
+            request_body=request_body,
+            raw_response=raw_response,
+            model_latency_ms=model_latency_ms,
+        ) from exc
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-        raise ModelProviderError("模型返回的报告结构不符合约定，请重试。") from exc
+        raise ModelOutputFormatError(
+            "模型返回的报告结构不符合约定，请重试。",
+            system_prompt=system_prompt,
+            user_prompt=context_text,
+            endpoint=url,
+            request_body=request_body,
+            raw_response=raw_response,
+            model_latency_ms=model_latency_ms,
+        ) from exc
     return ReportGenerationResult(
         report=report,
         context=context,

@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from datetime import datetime
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -7,12 +8,13 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.api import routes
+from app.auth import get_current_user
 from app.bazi.engine import calculate_chart
-from app.config import model_settings_enabled
 from app.credentials import LOCAL_CREDENTIAL_SCOPE, get_credential_repository
 from app.main import app
-from app.models import ModelCredential
+from app.models import ModelCredential, User
 from app.reports import (
+    ModelOutputFormatError,
     ModelProviderError,
     ReportGenerationResult,
     build_report_context,
@@ -48,6 +50,18 @@ def sample_report() -> BaziReport:
     )
 
 
+def authenticated_user(role: str = "admin") -> User:
+    return User(
+        id=uuid4(),
+        username=f"report-test-{role}",
+        display_name=f"Report Test {role}",
+        password_hash="unused",
+        role=role,
+        status="active",
+        must_change_password=False,
+    )
+
+
 class FakeCredentialRepository:
     def __init__(self, credential: ModelCredential | None = None) -> None:
         self.credential = credential
@@ -80,10 +94,13 @@ async def api_client(
     monkeypatch.setenv("APP_ENCRYPTION_KEY", MASTER_KEY)
     repository = FakeCredentialRepository()
     app.dependency_overrides[get_credential_repository] = lambda: repository
+    test_admin = authenticated_user()
+    app.dependency_overrides[get_current_user] = lambda: test_admin
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client, repository
     app.dependency_overrides.pop(get_credential_repository, None)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.mark.asyncio
@@ -132,7 +149,7 @@ async def test_report_requires_model_settings(
     response = await client.post("/api/v1/reports/generate", json=valid_payload())
 
     assert response.status_code == 409
-    assert "配置模型 API" in response.json()["detail"]
+    assert "管理员配置" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -228,6 +245,66 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     assert data["debug_trace"]["system_prompt"] == "system prompt"
     assert "sk-test-super-secret-6789" not in response.text
     assert captured["api_key"] == "sk-test-super-secret-6789"
+
+    app.dependency_overrides[get_current_user] = lambda: authenticated_user("user")
+    user_response = await client.post("/api/v1/reports/generate", json=valid_payload())
+    assert user_response.status_code == 200
+    assert user_response.json()["debug_trace"] is None
+
+
+@pytest.mark.asyncio
+async def test_report_format_error_returns_failed_debug_trace(
+    api_client: tuple[AsyncClient, FakeCredentialRepository],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, repository = api_client
+    encrypted = SecretCipher.from_environment().encrypt(
+        "sk-test-super-secret-6789",
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        key_version="v1",
+    )
+    repository.credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key=encrypted,
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+
+    async def fake_generate(**_: object) -> ReportGenerationResult:
+        raise ModelOutputFormatError(
+            "模型返回的报告结构不符合约定，请重试。",
+            system_prompt="system prompt",
+            user_prompt="user prompt",
+            endpoint="https://api.openai.com/v1/responses",
+            request_body={"model": "test-model", "input": "user prompt"},
+            raw_response={"output": [{"text": "invalid report"}]},
+            model_latency_ms=17,
+        )
+
+    monkeypatch.setattr(routes, "generate_structured_report", fake_generate)
+
+    response = await client.post("/api/v1/reports/generate", json=valid_payload())
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["message"] == "模型返回的报告结构不符合约定，请重试。"
+    trace = detail["debug_trace"]
+    assert trace["steps"][-1]["id"] == "validation"
+    assert trace["steps"][-1]["status"] == "failed"
+    assert trace["raw_response"] == {"output": [{"text": "invalid report"}]}
+    assert "sk-test-super-secret-6789" not in response.text
+
+    app.dependency_overrides[get_current_user] = lambda: authenticated_user("user")
+    user_response = await client.post("/api/v1/reports/generate", json=valid_payload())
+    assert user_response.status_code == 502
+    assert user_response.json()["detail"] == "模型返回的报告结构不符合约定，请重试。"
+    assert "debug_trace" not in user_response.text
 
 
 def test_report_context_omits_full_fortune_timeline() -> None:
@@ -336,6 +413,45 @@ async def test_model_request_is_one_shot_structured_and_has_no_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_invalid_model_report_preserves_response_for_debugging() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    raw_response = {
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": '{"chart_overview":"不完整"}'}],
+            }
+        ]
+    }
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=raw_response)
+
+    with pytest.raises(ModelOutputFormatError) as captured:
+        await generate_structured_report(
+            chart=chart,
+            credential=credential,
+            api_key="sk-test",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert captured.value.raw_response == raw_response
+    assert captured.value.model_latency_ms >= 0
+
+
+@pytest.mark.asyncio
 async def test_chat_completions_report_uses_messages_and_accepts_json_fence() -> None:
     chart = calculate_chart(BirthInput.model_validate(valid_payload()))
     credential = ModelCredential(
@@ -440,11 +556,3 @@ def test_secret_cipher_detects_tampering(monkeypatch: pytest.MonkeyPatch) -> Non
 
     with pytest.raises(SecretEncryptionError):
         cipher.decrypt(tampered, scope=LOCAL_CREDENTIAL_SCOPE, key_version="v1")
-
-
-def test_model_access_is_disabled_without_auth_in_production(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
-
-    assert model_settings_enabled() is False

@@ -10,6 +10,7 @@ import {
   Info,
   KeyRound,
   LoaderCircle,
+  LogOut,
   MapPin,
   PlugZap,
   RotateCcw,
@@ -17,15 +18,18 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  Users,
   Workflow,
   X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   deleteModelSettings,
   generateReport,
   getModelSettings,
   previewChart,
+  ReportGenerationError,
   saveModelSettings,
   testModelConnection,
 } from "@/lib/api";
@@ -51,6 +55,7 @@ import type {
   BigLuckPeriodDetail,
   ChartPreview,
   ChartPreviewRequest,
+  CurrentUser,
   FortuneCyclesDetail,
   FortunePillarDetail,
   Gender,
@@ -153,7 +158,13 @@ function useBeijingToday(): string {
   return today;
 }
 
-export function BaziWorkbench() {
+export function BaziWorkbench({
+  currentUser,
+  onLogout,
+}: {
+  currentUser: CurrentUser;
+  onLogout: () => void;
+}) {
   const [calendarType, setCalendarType] = useState<CalendarType>("solar");
   const [birthDate, setBirthDate] = useState<LunarDateParts>({
     year: 1990,
@@ -175,6 +186,7 @@ export function BaziWorkbench() {
   const [modelSettings, setModelSettings] = useState<ModelSettings | null>(null);
 
   useEffect(() => {
+    if (currentUser.role !== "admin") return;
     let active = true;
     void getModelSettings()
       .then((settings) => {
@@ -186,7 +198,7 @@ export function BaziWorkbench() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [currentUser.role]);
 
   const maxDate = useBeijingToday();
   const secondLevelOptions = useMemo(
@@ -299,15 +311,28 @@ export function BaziWorkbench() {
           <span className="brand-section">八字排盘</span>
         </div>
         <div className="topbar-actions">
-          <div className="topbar-note"><ShieldCheck size={15} aria-hidden="true" /> 规则可追溯</div>
-          <button
-            className="settings-button"
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="打开模型 API 设置"
-          >
-            <Settings size={16} aria-hidden="true" />
-            <span>设置 API</span>
+          {currentUser.role === "admin" && (
+            <>
+              <Link className="settings-button" href="/admin/users">
+                <Users size={16} aria-hidden="true" />
+                <span>用户管理</span>
+              </Link>
+              <button
+                className="settings-button"
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="打开模型 API 设置"
+              >
+                <Settings size={16} aria-hidden="true" />
+                <span>设置 API</span>
+              </button>
+            </>
+          )}
+          <span className="current-user" title={currentUser.username}>
+            {currentUser.display_name}<small>{currentUser.role === "admin" ? "管理员" : "用户"}</small>
+          </span>
+          <button className="logout-button" type="button" onClick={onLogout} aria-label="退出登录">
+            <LogOut size={16} aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -465,7 +490,9 @@ export function BaziWorkbench() {
             <ChartResult
               chart={chart}
               request={lastRequest}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={
+                currentUser.role === "admin" ? () => setSettingsOpen(true) : undefined
+              }
             />
           )}
         </section>
@@ -1172,8 +1199,12 @@ function AgentDebugModal({
           </dl>
           <ol className="agent-trace-timeline">
             {trace.steps.map((step, index) => (
-              <li key={step.id} data-category={step.category}>
-                <span className="agent-trace-marker"><CheckCircle2 size={15} aria-hidden="true" /></span>
+              <li key={step.id} data-category={step.category} data-status={step.status}>
+                <span className="agent-trace-marker">
+                  {step.status === "failed"
+                    ? <AlertCircle size={15} aria-hidden="true" />
+                    : <CheckCircle2 size={15} aria-hidden="true" />}
+                </span>
                 <div>
                   <div className="agent-trace-title">
                     <span>{String(index + 1).padStart(2, "0")}</span>
@@ -1219,21 +1250,26 @@ function ReportGenerator({
   onOpenSettings,
 }: {
   request: ChartPreviewRequest;
-  onOpenSettings: () => void;
+  onOpenSettings?: () => void;
 }) {
   const [result, setResult] = useState<ReportGenerationResponse | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [reportError, setReportError] = useState("");
+  const [failedTrace, setFailedTrace] = useState<AgentDebugTrace | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
 
   async function handleGenerate() {
     setReportError("");
+    setFailedTrace(null);
     setResult(null);
     setTraceOpen(false);
     setIsGenerating(true);
     try {
       setResult(await generateReport(request));
     } catch (generationError) {
+      if (generationError instanceof ReportGenerationError) {
+        setFailedTrace(generationError.debugTrace);
+      }
       setReportError(
         generationError instanceof Error ? generationError.message : "报告生成失败，请稍后重试。",
       );
@@ -1241,6 +1277,8 @@ function ReportGenerator({
       setIsGenerating(false);
     }
   }
+
+  const activeTrace = result?.debug_trace ?? failedTrace;
 
   return (
     <section className="report-section" aria-labelledby="report-title">
@@ -1268,8 +1306,20 @@ function ReportGenerator({
         <div className="report-error" role="alert">
           <AlertCircle size={17} aria-hidden="true" />
           <div><strong>暂时无法生成报告</strong><span>{reportError}</span></div>
-          <button type="button" onClick={onOpenSettings}>检查 API 设置</button>
+          {failedTrace && (
+            <button type="button" onClick={() => setTraceOpen(true)}>
+              <Workflow size={13} aria-hidden="true" />查看执行链路
+            </button>
+          )}
+          {onOpenSettings && <button type="button" onClick={onOpenSettings}>检查 API 设置</button>}
         </div>
+      )}
+
+      {traceOpen && activeTrace && (
+        <AgentDebugModal
+          trace={activeTrace}
+          onClose={() => setTraceOpen(false)}
+        />
       )}
 
       {result && !isGenerating && (
@@ -1279,22 +1329,18 @@ function ReportGenerator({
               <p className="eyebrow">GENERATED REPORT</p>
               <h3>命盘分析</h3>
             </div>
-            <button
-              className="agent-trace-button"
-              type="button"
-              aria-expanded={traceOpen}
-              onClick={() => setTraceOpen((open) => !open)}
-            >
-              <Workflow size={15} aria-hidden="true" />
-              {traceOpen ? "收起执行链路" : "查看执行链路"}
-            </button>
+            {result.debug_trace && (
+              <button
+                className="agent-trace-button"
+                type="button"
+                aria-expanded={traceOpen}
+                onClick={() => setTraceOpen((open) => !open)}
+              >
+                <Workflow size={15} aria-hidden="true" />
+                {traceOpen ? "收起执行链路" : "查看执行链路"}
+              </button>
+            )}
           </header>
-          {traceOpen && (
-            <AgentDebugModal
-              trace={result.debug_trace}
-              onClose={() => setTraceOpen(false)}
-            />
-          )}
           <div className="report-sections">
             {REPORT_SECTIONS.map((section, index) => (
               <section key={section.key}>
@@ -1322,7 +1368,7 @@ function ChartResult({
 }: {
   chart: ChartPreview;
   request: ChartPreviewRequest;
-  onOpenSettings: () => void;
+  onOpenSettings?: () => void;
 }) {
   const calendar = chart.chart?.calendar;
   const normalized = chart.normalized_input ?? {};

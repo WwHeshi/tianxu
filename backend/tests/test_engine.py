@@ -81,6 +81,17 @@ def test_missing_birthplace_uses_beijing_clock_without_solar_adjustment() -> Non
     assert "未选择出生地点" in result.engine.solar_time_note
 
 
+def test_missing_birthplace_does_not_warn_near_beijing_pillar_boundary() -> None:
+    result = calculate_chart(
+        BirthInput(
+            beijing_datetime="1990-01-01T00:05:00",
+            gender="female",
+        )
+    )
+
+    assert result.warnings == []
+
+
 def test_official_mca_coordinate_is_used_without_fallback() -> None:
     result = calculate("1990-01-01T12:00:00", CHONGQING_LIANGJIANG)
     adjustment = result.solar_time_adjustment

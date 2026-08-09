@@ -1,21 +1,35 @@
 from datetime import datetime
 from importlib.metadata import version
 from typing import AsyncIterator
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.api import routes
+from app.auth import get_current_user
 from app.bazi.locations import LocationDataError
 from app.main import app
+from app.models import User
 
 
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[AsyncClient]:
+    test_admin = User(
+        id=uuid4(),
+        username="api-test-admin",
+        display_name="API Test Admin",
+        password_hash="unused",
+        role="admin",
+        status="active",
+        must_change_password=False,
+    )
+    app.dependency_overrides[get_current_user] = lambda: test_admin
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as test_client:
         yield test_client
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def guangzhou_birthplace() -> dict[str, str]:

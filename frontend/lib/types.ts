@@ -1,5 +1,48 @@
 export type Gender = "male" | "female";
 
+export type UserRole = "user" | "admin";
+export type UserStatus = "active" | "disabled";
+
+export interface CurrentUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  status: UserStatus;
+  must_change_password: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoginResponse {
+  user: CurrentUser;
+}
+
+export interface BootstrapStatus {
+  required: boolean;
+}
+
+export interface UserListResponse {
+  items: CurrentUser[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface AdminUserCreate {
+  username: string;
+  display_name: string;
+  temporary_password: string;
+  role: UserRole;
+}
+
+export interface AdminUserUpdate {
+  display_name?: string;
+  role?: UserRole;
+  status?: UserStatus;
+}
+
 export interface CalculationPolicyInput {
   version: "v1";
   year_boundary: "lichun";
@@ -256,7 +299,7 @@ export interface AgentTraceStep {
   id: string;
   title: string;
   category: "deterministic" | "context" | "prompt" | "model" | "validation";
-  status: "completed";
+  status: "completed" | "failed";
   detail: string;
   duration_ms: number | null;
 }
@@ -289,5 +332,5 @@ export interface ReportGenerationResponse {
     schema_version: string;
     engine_version: string;
   };
-  debug_trace: AgentDebugTrace;
+  debug_trace: AgentDebugTrace | null;
 }

@@ -10,6 +10,9 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
+首次打开前端时会通过一次性 `/api/v1/auth/bootstrap` 接口创建首位管理员。命令行
+`uv run python -m app.cli create-admin --username admin --display-name 管理员` 可作为无前端时的备用方式。
+
 打开 `http://localhost:8000/docs` 查看 OpenAPI，运行测试：
 
 ```powershell
@@ -19,15 +22,27 @@ uv run pytest
 ## 接口
 
 - `GET /api/v1/health`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/bootstrap-status`
+- `POST /api/v1/auth/bootstrap`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+- `POST /api/v1/auth/change-password`
 - `POST /api/v1/charts/preview`
 - `GET /api/v1/model-settings`
 - `PUT /api/v1/model-settings`
 - `POST /api/v1/model-settings/test`
 - `DELETE /api/v1/model-settings`
 - `POST /api/v1/reports/generate`
+- `GET /api/v1/admin/users`
+- `POST /api/v1/admin/users`
+- `PATCH /api/v1/admin/users/{user_id}`
+- `POST /api/v1/admin/users/{user_id}/reset-password`
+- `POST /api/v1/admin/users/{user_id}/revoke-sessions`
 
-当前没有用户认证，`model-settings` 和报告端点只在开发、本地和测试环境开放，生产环境
-由代码强制关闭。模型 API 密钥使用 `APP_ENCRYPTION_KEY`（Base64 编码的 32 字节
+账户使用 Argon2id 密码哈希和 PostgreSQL 持久化的可吊销 Session，浏览器仅保存
+HttpOnly Cookie。普通用户可以排盘和生成报告；管理员额外负责用户与模型设置。
+模型 API 密钥使用 `APP_ENCRYPTION_KEY`（Base64 编码的 32 字节
 主密钥）进行 AES-GCM 加密；数据库只保存密文、末四位和模型连接元数据，GET 响应不返回
 明文密钥。
 
@@ -39,9 +54,9 @@ uv run pytest
 大运时间线，只保留当前大运、流年和流月；模型以一次 Responses API 或兼容的 Chat
 Completions 调用返回八个固定章节。当前没有知识库、RAG、工具调用、引文或对话历史。
 
-成功响应同时返回本次报告的 `debug_trace`，用于本地展示排盘、上下文裁剪、提示词组装、
-模型调用和输出校验链路。调试快照包含提示词与命盘上下文，但不包含 API 密钥、
-Authorization 请求头或上游原始响应，不应在未授权的生产页面公开。
+管理员生成报告时同时返回 `debug_trace`，用于展示排盘、上下文裁剪、提示词组装、模型调用和
+输出校验链路。普通用户的成功和失败响应都不包含执行链路。调试快照包含提示词与命盘上下文，
+但不包含 API 密钥或 Authorization 请求头；原始模型响应不应写入普通日志。
 
 设置中的 Base URL 只填写版本根路径，后端按协议追加端点。例如智谱 Chat Completions
 填写 `https://open.bigmodel.cn/api/paas/v4`，后端会追加 `/chat/completions`。

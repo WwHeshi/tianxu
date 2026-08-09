@@ -1,7 +1,5 @@
-"use client";
-
-import { BaziWorkbench } from "@/components/bazi-workbench";
+import { AuthenticatedWorkbench } from "@/components/authenticated-workbench";
 
 export default function Home() {
-  return <BaziWorkbench />;
+  return <AuthenticatedWorkbench />;
 }

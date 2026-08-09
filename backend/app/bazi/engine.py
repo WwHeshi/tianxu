@@ -203,9 +203,6 @@ def _normalize_birth(
     birth: BirthInput,
 ) -> tuple[NormalizedBirthInput, SolarTimeAdjustment | None, list[str]]:
     if birth.birthplace is None:
-        warnings: list[str] = []
-        if _minutes_from_pillar_boundary(birth.beijing_datetime) <= 10:
-            warnings.append("北京时间接近换日或时辰边界，请复核出生时间")
         return (
             NormalizedBirthInput(
                 beijing_datetime=birth.beijing_datetime,
@@ -216,7 +213,7 @@ def _normalize_birth(
                 gender=birth.gender,
             ),
             None,
-            warnings,
+            [],
         )
 
     try:

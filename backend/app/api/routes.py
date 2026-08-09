@@ -6,9 +6,10 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
+from ..auth import AdminUserDependency, ReadyUserDependency
 from ..bazi.engine import ENGINE_VERSION, ChartCalculationError, calculate_chart
 from ..bazi.locations import LocationDataError, validate_location_data
-from ..config import app_environment, model_settings_enabled
+from ..config import app_environment
 from ..credentials import (
     LOCAL_CREDENTIAL_SCOPE,
     ModelCredentialRepository,
@@ -18,6 +19,7 @@ from ..models import ModelCredential
 from ..reports import (
     PROMPT_VERSION,
     REPORT_SCHEMA_VERSION,
+    ModelOutputFormatError,
     ModelProviderError,
     generate_structured_report,
     test_model_connection,
@@ -42,11 +44,6 @@ router = APIRouter(prefix="/api/v1")
 CredentialRepositoryDependency = Annotated[
     ModelCredentialRepository, Depends(get_credential_repository)
 ]
-
-
-def _require_model_settings_enabled() -> None:
-    if not model_settings_enabled():
-        raise HTTPException(status_code=404, detail="模型设置接口未启用")
 
 
 def _model_settings_response(
@@ -116,7 +113,7 @@ def health() -> HealthResponse:
     status_code=status.HTTP_200_OK,
     tags=["charts"],
 )
-def preview_chart(payload: BirthInput) -> ChartPreviewResponse:
+def preview_chart(payload: BirthInput, _user: ReadyUserDependency) -> ChartPreviewResponse:
     try:
         return calculate_chart(payload)
     except ChartCalculationError as exc:
@@ -130,8 +127,8 @@ def preview_chart(payload: BirthInput) -> ChartPreviewResponse:
 )
 async def get_model_settings(
     repository: CredentialRepositoryDependency,
+    _admin: AdminUserDependency,
 ) -> ModelSettingsResponse:
-    _require_model_settings_enabled()
     return _model_settings_response(await repository.get())
 
 
@@ -143,8 +140,8 @@ async def get_model_settings(
 async def put_model_settings(
     payload: ModelSettingsUpdate,
     repository: CredentialRepositoryDependency,
+    _admin: AdminUserDependency,
 ) -> ModelSettingsResponse:
-    _require_model_settings_enabled()
     base_url = _normalize_base_url(payload.base_url, payload.api_protocol)
     api_key = payload.api_key.get_secret_value().strip()
     if len(api_key) < 8:
@@ -178,8 +175,8 @@ async def put_model_settings(
 async def test_model_settings_connection(
     payload: ModelConnectionTestRequest,
     repository: CredentialRepositoryDependency,
+    _admin: AdminUserDependency,
 ) -> ModelConnectionTestResponse:
-    _require_model_settings_enabled()
     base_url = _normalize_base_url(payload.base_url, payload.api_protocol)
 
     api_key = payload.api_key.get_secret_value().strip() if payload.api_key else ""
@@ -222,8 +219,8 @@ async def test_model_settings_connection(
 )
 async def delete_model_settings(
     repository: CredentialRepositoryDependency,
+    _admin: AdminUserDependency,
 ) -> Response:
-    _require_model_settings_enabled()
     await repository.delete()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -236,8 +233,8 @@ async def delete_model_settings(
 async def generate_report(
     payload: BirthInput,
     repository: CredentialRepositoryDependency,
+    user: ReadyUserDependency,
 ) -> ReportGenerationResponse:
-    _require_model_settings_enabled()
     chart_started = perf_counter()
     try:
         chart = calculate_chart(payload)
@@ -247,7 +244,7 @@ async def generate_report(
 
     credential = await repository.get()
     if credential is None:
-        raise HTTPException(status_code=409, detail="请先在右上角配置模型 API")
+        raise HTTPException(status_code=409, detail="模型 API 尚未由管理员配置")
     try:
         api_key = SecretCipher.from_environment().decrypt(
             credential.encrypted_api_key,
@@ -261,6 +258,67 @@ async def generate_report(
         )
     except SecretEncryptionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelOutputFormatError as exc:
+        if user.role != "admin":
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        debug_trace = AgentDebugTrace(
+            steps=[
+                AgentTraceStep(
+                    id="chart",
+                    title="服务端重新排盘",
+                    category="deterministic",
+                    status="completed",
+                    detail="后端根据 BirthInput 重新计算命盘，不采用客户端命盘 JSON。",
+                    duration_ms=chart_duration_ms,
+                ),
+                AgentTraceStep(
+                    id="context",
+                    title="裁剪模型上下文",
+                    category="context",
+                    status="completed",
+                    detail="保留四柱及派生数据，只选取当前大运、流年和流月。",
+                ),
+                AgentTraceStep(
+                    id="prompt",
+                    title="组装提示词",
+                    category="prompt",
+                    status="completed",
+                    detail="组合固定系统约束、用户指令与精简命盘上下文。",
+                ),
+                AgentTraceStep(
+                    id="model",
+                    title="调用模型",
+                    category="model",
+                    status="completed",
+                    detail=f"通过 {credential.api_protocol} 协议发起一次无工具模型请求。",
+                    duration_ms=exc.model_latency_ms,
+                ),
+                AgentTraceStep(
+                    id="validation",
+                    title="校验报告结构",
+                    category="validation",
+                    status="failed",
+                    detail=str(exc),
+                ),
+            ],
+            system_prompt=exc.system_prompt,
+            user_prompt=exc.user_prompt,
+            request=AgentRequestDebug(
+                method="POST",
+                endpoint=exc.endpoint,
+                provider=credential.provider,
+                api_protocol=credential.api_protocol,
+                model=credential.model,
+                request_count=1,
+                body=exc.request_body,
+            ),
+            raw_response=exc.raw_response,
+            redacted=["API 密钥", "Authorization 请求头"],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={"message": str(exc), "debug_trace": debug_trace.model_dump(mode="json")},
+        ) from exc
     except ModelProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -328,5 +386,7 @@ async def generate_report(
             ),
             raw_response=execution.raw_response,
             redacted=["API 密钥", "Authorization 请求头"],
-        ),
+        )
+        if user.role == "admin"
+        else None,
     )

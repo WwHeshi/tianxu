@@ -19,7 +19,7 @@
 
 ## 当前状态
 
-当前 MVP 提供确定性排盘、当前大运/流年/流月展示和一次性 AI 报告。第一版不包含知识库、RAG、Agent 工具或对话历史；报告只使用服务端重新计算的命盘和精简后的当前运势上下文。
+当前 MVP 提供用户与管理员账户、确定性排盘、当前大运/流年/流月展示和一次性 AI 报告。第一版不包含知识库、RAG、Agent 工具或对话历史；报告只使用服务端重新计算的命盘和精简后的当前运势上下文。
 
 ## Docker 热更新开发（推荐）
 
@@ -43,6 +43,15 @@ Copy-Item .env.example .env
 - FastAPI 文档：<http://localhost:8000/docs>
 - 后端健康检查：<http://localhost:8000/api/v1/health>
 - PostgreSQL：`localhost:5432`
+
+第一次打开前端时，系统会自动进入 `/setup`，引导创建首位管理员并直接登录。创建成功后，
+该初始化入口会永久关闭。如果前端无法使用，也可以通过后端命令行完成初始化：
+
+```powershell
+docker compose -f docker-compose.dev.yml exec backend uv run python -m app.cli create-admin --username admin --display-name 管理员
+```
+
+系统不提供默认密码。后续普通用户和其他管理员都由管理后台创建，并在首次登录时强制修改临时密码。
 
 开发配置使用源码目录挂载，不需要 `--watch`：
 
@@ -80,7 +89,7 @@ npm run dev
 
 非 Docker 启动前需要提供可用的 `DATABASE_URL` 和 `APP_ENCRYPTION_KEY`。前者用于 PostgreSQL，后者必须是 Base64 编码的 32 字节随机值。模型 API 密钥不放在环境变量中：在页面右上角设置后，后端用 AES-GCM 加密并保存到 PostgreSQL，只向浏览器返回配置状态和末四位。
 
-当前没有用户认证，因此模型设置和报告能力只在 `development`、`local` 和 `test` 环境开放；生产环境由代码强制关闭，直到接入用户身份和授权校验。
+账户密码使用 Argon2id 哈希，登录状态通过 HttpOnly Session Cookie 和 PostgreSQL 管理。普通用户可排盘和生成报告，只有管理员可以管理用户与模型 API 设置。生产环境还会校验携带 Session 的写请求来源，并要求 Cookie 使用 HTTPS。
 
 ## 目录约定
 
