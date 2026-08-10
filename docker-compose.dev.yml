@@ -29,6 +29,7 @@ services:
       DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql+asyncpg://tianxu:tianxu_dev_password@postgres:5432/tianxu}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      MINGLI_BENCH_DATA_PATH: /app/evaluation_data/data.json
       WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -37,6 +38,7 @@ services:
       - ./backend/alembic.ini:/app/alembic.ini:ro
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
+      - ./external/MingLi-Bench/data:/app/evaluation_data:ro
     command:
       - sh
       - -c

@@ -181,14 +181,56 @@ def test_historical_local_daylight_saving_time_is_metadata_only(
     ).total_seconds() == pytest.approx(0, abs=0.5)
 
 
-def test_true_solar_midnight_boundary_changes_day_and_hour_pillars() -> None:
-    before_midnight = calculate("2024-01-02T00:29:00")
-    after_midnight = calculate("2024-01-02T00:30:00")
+def test_true_solar_zi_hour_boundary_changes_day_and_hour_pillars() -> None:
+    before_zi_hour = calculate("2024-01-02T23:30:00")
+    after_zi_hour = calculate("2024-01-02T23:31:00")
 
-    assert before_midnight.normalized_input.true_solar_datetime.date().isoformat() == "2024-01-01"
-    assert after_midnight.normalized_input.true_solar_datetime.date().isoformat() == "2024-01-02"
-    assert before_midnight.chart.pillars.day.gan_zhi != after_midnight.chart.pillars.day.gan_zhi
-    assert before_midnight.chart.pillars.hour.gan_zhi != after_midnight.chart.pillars.hour.gan_zhi
+    assert before_zi_hour.normalized_input.true_solar_datetime.hour == 22
+    assert after_zi_hour.normalized_input.true_solar_datetime.hour == 23
+    assert (
+        before_zi_hour.chart.pillars.day.gan_zhi
+        != after_zi_hour.chart.pillars.day.gan_zhi
+    )
+    assert (
+        before_zi_hour.chart.pillars.hour.gan_zhi
+        != after_zi_hour.chart.pillars.hour.gan_zhi
+    )
+
+
+@pytest.mark.parametrize(
+    ("beijing_datetime", "expected_pillars"),
+    [
+        (
+            "1966-10-18T23:15:00",
+            ("丙午", "戊戌", "辛亥", "戊子"),
+        ),
+        (
+            "1993-04-08T23:34:00",
+            ("癸酉", "丙辰", "庚申", "丙子"),
+        ),
+        (
+            "1988-02-15T16:50:00",
+            ("戊辰", "甲寅", "庚子", "甲申"),
+        ),
+    ],
+)
+def test_default_policy_matches_corrected_mingli_reference_cases(
+    beijing_datetime: str,
+    expected_pillars: tuple[str, str, str, str],
+) -> None:
+    result = calculate_chart(
+        BirthInput(beijing_datetime=beijing_datetime, gender="female")
+    )
+    pillars = result.chart.pillars
+
+    assert result.calculation_policy.version == "v2"
+    assert result.calculation_policy.day_boundary == "zi_hour_start"
+    assert (
+        pillars.year.gan_zhi,
+        pillars.month.gan_zhi,
+        pillars.day.gan_zhi,
+        pillars.hour.gan_zhi,
+    ) == expected_pillars
 
 
 def test_xinjiang_true_solar_time_crosses_date_and_changes_hour_pillar() -> None:

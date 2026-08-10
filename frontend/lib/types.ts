@@ -43,11 +43,156 @@ export interface AdminUserUpdate {
   status?: UserStatus;
 }
 
+export type EvaluationScope = "quick" | "year" | "all";
+export type EvaluationRunStatus =
+  | "queued"
+  | "running"
+  | "cancel_requested"
+  | "cancelled"
+  | "completed"
+  | "failed";
+
+export interface EvaluationDatasetOverview {
+  available: boolean;
+  error: string | null;
+  dataset_name: string;
+  sha256: string | null;
+  question_count: number;
+  case_count: number;
+  years: Record<string, number>;
+  scopes: Record<string, number>;
+}
+
+export interface EvaluationRunSummary {
+  id: string;
+  scope: EvaluationScope;
+  benchmark_year: number | null;
+  mode: string;
+  max_concurrency: number;
+  dataset_name: string;
+  dataset_sha256: string;
+  dataset_question_count: number;
+  provider: string;
+  api_protocol: string;
+  model: string;
+  prompt_version: string;
+  engine_version: string;
+  calculation_policy_version: string;
+  status: EvaluationRunStatus;
+  total_questions: number;
+  completed_questions: number;
+  correct_answers: number;
+  error_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  progress: number;
+  accuracy: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  failure_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvaluationBreakdown {
+  key: string;
+  total: number;
+  completed: number;
+  correct: number;
+  errors: number;
+  accuracy: number | null;
+}
+
+export interface EvaluationRunDetail extends EvaluationRunSummary {
+  by_year: EvaluationBreakdown[];
+  by_category: EvaluationBreakdown[];
+  chart_aligned_accuracy: number | null;
+  chart_aligned_completed: number;
+  case_31_accuracy: number | null;
+  case_31_completed: number;
+}
+
+export interface EvaluationOverview {
+  dataset: EvaluationDatasetOverview;
+  model_configured: boolean;
+  model: string | null;
+  api_protocol: string | null;
+  active_run: EvaluationRunSummary | null;
+}
+
+export interface EvaluationRunList {
+  items: EvaluationRunSummary[];
+  total: number;
+}
+
+export interface EvaluationStartRequest {
+  scope: EvaluationScope;
+  benchmark_year: 2022 | 2023 | 2024 | 2025 | null;
+  mode: "tianxu_fortune";
+  max_concurrency: number;
+  confirmed_request_count: number;
+}
+
+export interface EvaluationItem {
+  id: number;
+  question_id: string;
+  case_id: string;
+  benchmark_year: number;
+  category: string;
+  question: string;
+  options: Array<{ letter: string; text: string }>;
+  correct_answer: string;
+  predicted_answer: string | null;
+  is_correct: boolean;
+  status: "pending" | "completed" | "error";
+  confidence: number | null;
+  reasoning_summary: string | null;
+  error_message: string | null;
+  latency_ms: number | null;
+  input_tokens: number;
+  output_tokens: number;
+  prompt_sha256: string | null;
+}
+
+export interface EvaluationItemList {
+  items: EvaluationItem[];
+  total: number;
+}
+
+export interface EvaluationTraceStep {
+  id: string;
+  title: string;
+  status: "completed" | "failed";
+  detail: string;
+  duration_ms: number | null;
+}
+
+export interface EvaluationItemTrace {
+  question_id: string;
+  status: EvaluationItem["status"];
+  steps: EvaluationTraceStep[];
+  request: {
+    method: "POST";
+    endpoint: string;
+    provider: string;
+    api_protocol: string;
+    model: string;
+    headers: Record<string, string>;
+    body: Record<string, unknown>;
+  } | null;
+  response: {
+    status_code: number | null;
+    body: Record<string, unknown> | null;
+  };
+  prompt_sha256: string | null;
+  redacted: string[];
+}
+
 export interface CalculationPolicyInput {
-  version: "v1";
+  version: "v2";
   year_boundary: "lichun";
   month_boundary: "solar_terms";
-  day_boundary: "midnight";
+  day_boundary: "zi_hour_start";
   time_basis: "beijing_standard_time";
   true_solar_time: boolean;
 }

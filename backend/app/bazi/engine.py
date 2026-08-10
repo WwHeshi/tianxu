@@ -120,7 +120,10 @@ BEIJING_TIME_NOTE = (
 )
 LIMITATIONS = [
     "经度取静态区级代表点；同一区域内的实际出生地点仍可能带来少量时间误差。",
-    "提供出生地点时使用真太阳时；未提供地点时使用北京时间。规则 v1 均在所选时间基准的 00:00 换日。",
+    (
+        "提供出生地点时使用真太阳时；未提供地点时使用北京时间。"
+        "规则 v2 在所选时间基准的 23:00（子初）换日。"
+    ),
     "接近换日、时辰或节气边界时，应复核出生时间；真太阳时模式还应结合具体地址复核。",
     "均时差使用 NOAA 近似公式，节气表由排盘库提供，边界样例仍需独立历书交叉校验。",
     "性别用于乾造、坤造标签、元辰规则和大运顺逆；`other` 不生成运势周期。",
@@ -160,8 +163,9 @@ def _round_to_second(value: datetime) -> datetime:
 
 def _minutes_from_pillar_boundary(value: datetime) -> float:
     minute_of_day = value.hour * 60 + value.minute + value.second / 60
-    # Day changes at 00:00; two-hour branches change at each odd-numbered hour.
-    boundaries = (0, *(hour * 60 for hour in range(1, 24, 2)), 24 * 60)
+    # Two-hour branches change at each odd-numbered hour. The day and Zi-hour
+    # boundaries both occur at 23:00 under the selected sect-1 policy.
+    boundaries = tuple(hour * 60 for hour in range(1, 24, 2))
     return min(abs(minute_of_day - boundary) for boundary in boundaries)
 
 
@@ -632,21 +636,14 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
         )
         lunar = solar.getLunar()
         eight_char = lunar.getEightChar()
-        # Sect 2 is the library's midnight rollover convention (our v1 policy).
-        eight_char.setSect(2)
+        # lunar-python sect 1 rolls the day pillar at 23:00 (Zi-hour start).
+        eight_char.setSect(1)
         raw_pillars = {
             "year": eight_char.getYear(),
             "month": eight_char.getMonth(),
             "day": eight_char.getDay(),
+            "hour": eight_char.getTime(),
         }
-        # lunar-python derives the 23:00 hour stem from the next day's stem even
-        # in sect 2.  v1 explicitly uses midnight rollover, so derive the hour
-        # stem from the selected day pillar while retaining the library's branch.
-        time_zhi = eight_char.getTimeZhi()
-        day_gan_index = GAN.index(raw_pillars["day"][0])
-        time_zhi_index = ZHI.index(time_zhi)
-        time_gan = GAN[(day_gan_index % 5 * 2 + time_zhi_index) % len(GAN)]
-        raw_pillars["hour"] = time_gan + time_zhi
     except Exception as exc:  # upstream exceptions are not part of our API contract
         raise ChartCalculationError("lunar-python could not calculate this date") from exc
 

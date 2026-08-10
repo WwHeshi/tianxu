@@ -4,6 +4,12 @@ import type {
   AdminUserUpdate,
   ChartPreview,
   ChartPreviewRequest,
+  EvaluationItemList,
+  EvaluationItemTrace,
+  EvaluationOverview,
+  EvaluationRunDetail,
+  EvaluationRunList,
+  EvaluationStartRequest,
   BootstrapStatus,
   CurrentUser,
   LoginResponse,
@@ -182,6 +188,85 @@ export function revokeUserSessions(userId: string): Promise<void> {
   return requestJson<void>(`/api/v1/admin/users/${userId}/revoke-sessions`, {
     method: "POST",
   });
+}
+
+export function getEvaluationOverview(): Promise<EvaluationOverview> {
+  return requestJson<EvaluationOverview>("/api/v1/admin/evaluations/overview", {
+    method: "GET",
+  });
+}
+
+export function listEvaluationRuns(): Promise<EvaluationRunList> {
+  return requestJson<EvaluationRunList>("/api/v1/admin/evaluations/runs", {
+    method: "GET",
+  });
+}
+
+export function startEvaluationRun(
+  input: EvaluationStartRequest,
+): Promise<EvaluationRunDetail> {
+  return requestJson<EvaluationRunDetail>("/api/v1/admin/evaluations/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function getEvaluationRun(runId: string): Promise<EvaluationRunDetail> {
+  return requestJson<EvaluationRunDetail>(`/api/v1/admin/evaluations/runs/${runId}`, {
+    method: "GET",
+  });
+}
+
+export function getEvaluationItems(
+  runId: string,
+  result?: "correct" | "incorrect" | "error",
+): Promise<EvaluationItemList> {
+  const query = result ? `?result=${result}` : "";
+  return requestJson<EvaluationItemList>(
+    `/api/v1/admin/evaluations/runs/${runId}/items${query}`,
+    { method: "GET" },
+  );
+}
+
+export function getEvaluationItemTrace(
+  runId: string,
+  itemId: number,
+): Promise<EvaluationItemTrace> {
+  return requestJson<EvaluationItemTrace>(
+    `/api/v1/admin/evaluations/runs/${runId}/items/${itemId}/trace`,
+    { method: "GET" },
+  );
+}
+
+export function cancelEvaluationRun(runId: string): Promise<EvaluationRunDetail> {
+  return requestJson<EvaluationRunDetail>(
+    `/api/v1/admin/evaluations/runs/${runId}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export async function downloadEvaluationExport(
+  runId: string,
+  format: "json" | "csv",
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/admin/evaluations/runs/${runId}/export?format=${format}`,
+    { credentials: "include" },
+  );
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as FastApiValidationError | null;
+    throw new ApiError(getErrorMessage(payload, response.status), response.status);
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = `mingli-evaluation-${runId}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export async function previewChart(input: ChartPreviewRequest): Promise<ChartPreview> {

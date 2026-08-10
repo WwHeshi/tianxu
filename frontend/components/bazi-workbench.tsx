@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   FileText,
+  FlaskConical,
   Info,
   KeyRound,
   LoaderCircle,
@@ -75,10 +76,10 @@ const PILLARS: Array<{ key: PillarKey; label: string; description: string }> = [
 ];
 
 const DEFAULT_POLICY = {
-  version: "v1" as const,
+  version: "v2" as const,
   year_boundary: "lichun" as const,
   month_boundary: "solar_terms" as const,
-  day_boundary: "midnight" as const,
+  day_boundary: "zi_hour_start" as const,
   time_basis: "beijing_standard_time" as const,
   true_solar_time: true as const,
 };
@@ -313,6 +314,10 @@ export function BaziWorkbench({
         <div className="topbar-actions">
           {currentUser.role === "admin" && (
             <>
+              <Link className="settings-button" href="/admin/evaluations">
+                <FlaskConical size={16} aria-hidden="true" />
+                <span>评测中心</span>
+              </Link>
               <Link className="settings-button" href="/admin/users">
                 <Users size={16} aria-hidden="true" />
                 <span>用户管理</span>

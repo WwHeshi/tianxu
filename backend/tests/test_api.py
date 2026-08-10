@@ -115,10 +115,10 @@ async def test_preview_returns_chart_and_true_solar_metadata(client: AsyncClient
         ("440106", "天河区", "district"),
     )
     assert data["calculation_policy"] == {
-        "version": "v1",
+        "version": "v2",
         "year_boundary": "lichun",
         "month_boundary": "solar_terms",
-        "day_boundary": "midnight",
+        "day_boundary": "zi_hour_start",
         "time_basis": "beijing_standard_time",
         "true_solar_time": True,
     }
