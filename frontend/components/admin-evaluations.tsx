@@ -354,7 +354,7 @@ export function AdminEvaluations() {
             <section className="admin-table-card evaluation-items-card">
               <div className="admin-table-header"><strong>逐题结果</strong><div className="evaluation-table-actions"><select value={resultFilter} onChange={(event) => setResultFilter(event.target.value as typeof resultFilter)}><option value="all">全部</option><option value="correct">只看正确</option><option value="incorrect">只看答错</option><option value="error">只看错误</option></select><button type="button" onClick={() => void handleExport("json")}><Download size={14} />JSON</button><button type="button" onClick={() => void handleExport("csv")}><Download size={14} />CSV</button><button type="button" onClick={() => void loadRun(selectedRun.id, resultFilter)}><RefreshCcw size={14} />刷新</button></div></div>
               <div className="admin-table-wrap">
-                <table><thead><tr><th>题目</th><th>年份 / 分类</th><th>模型答案</th><th>正确答案</th><th>结果</th><th>耗时</th></tr></thead>
+                <table><thead><tr><th>题目</th><th>年份 / 分类</th><th>模型答案</th><th>正确答案</th><th>结果</th><th>耗时</th><th>调用链路</th></tr></thead>
                   <tbody>{items.map((item) => (
                     <EvaluationItemRow
                       item={item}
@@ -412,15 +412,6 @@ function EvaluationItemRow({
             {item.reasoning_summary && <p><b>模型依据：</b>{item.reasoning_summary}</p>}
             {item.error_message && <p className="is-error"><b>错误：</b>{item.error_message}</p>}
             <small>case {item.case_id} · 置信度 {item.confidence ?? "—"} · Token {item.input_tokens + item.output_tokens}</small>
-            <button
-              className="evaluation-trace-button"
-              type="button"
-              disabled={item.status === "pending" || loadingTrace}
-              onClick={onOpenTrace}
-            >
-              {loadingTrace ? <LoaderCircle className="spin" size={13} /> : <Workflow size={13} />}
-              {loadingTrace ? "正在读取" : "查看调用链路"}
-            </button>
           </div>
         </details>
       </td>
@@ -429,6 +420,17 @@ function EvaluationItemRow({
       <td><strong>{item.correct_answer}</strong></td>
       <td>{item.status === "pending" ? <span className="evaluation-result is-pending"><LoaderCircle className="spin" size={12} />等待</span> : item.status === "error" ? <span className="evaluation-result is-error"><AlertCircle size={12} />错误</span> : item.is_correct ? <span className="evaluation-result is-correct"><CheckCircle2 size={12} />正确</span> : <span className="evaluation-result is-wrong"><XCircle size={12} />答错</span>}</td>
       <td>{item.latency_ms === null ? "—" : `${(item.latency_ms / 1000).toFixed(1)}秒`}</td>
+      <td>
+        <button
+          className="evaluation-trace-button"
+          type="button"
+          disabled={item.status === "pending" || loadingTrace}
+          onClick={onOpenTrace}
+        >
+          {loadingTrace ? <LoaderCircle className="spin" size={13} /> : <Workflow size={13} />}
+          {loadingTrace ? "读取中" : "查看"}
+        </button>
+      </td>
     </tr>
   );
 }
@@ -509,12 +511,6 @@ function EvaluationTraceModal({
           </ol>
 
           <div className="agent-debug-details">
-            <details open>
-              <summary>请求头（已脱敏）</summary>
-              <pre>{trace.request
-                ? JSON.stringify(trace.request.headers, null, 2)
-                : "该记录没有可用的请求快照。"}</pre>
-            </details>
             <details>
               <summary>模型请求体</summary>
               <pre>{trace.request
