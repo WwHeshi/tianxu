@@ -68,10 +68,6 @@ class EvaluationRunSummary(BaseModel):
 class EvaluationRunDetail(EvaluationRunSummary):
     by_year: list[EvaluationBreakdown]
     by_category: list[EvaluationBreakdown]
-    chart_aligned_accuracy: float | None
-    chart_aligned_completed: int
-    case_31_accuracy: float | None
-    case_31_completed: int
 
 
 class EvaluationRunList(BaseModel):

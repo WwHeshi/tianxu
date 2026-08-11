@@ -73,6 +73,54 @@ function scopeLabel(run: EvaluationRunSummary): string {
   return "完整评测 · 160题";
 }
 
+function formatUserPrompt(prompt: string): string {
+  const jsonStart = prompt.indexOf("\n");
+  if (jsonStart === -1) return prompt;
+
+  const heading = prompt.slice(0, jsonStart);
+  const payload = prompt.slice(jsonStart + 1).trim();
+  try {
+    return `${heading}\n${JSON.stringify(JSON.parse(payload), null, 2)}`;
+  } catch {
+    return prompt;
+  }
+}
+
+function evaluationPrompts(trace: EvaluationItemTrace): {
+  systemPrompt: string | null;
+  userPrompt: string | null;
+} {
+  const body = trace.request?.body;
+  if (!body) return { systemPrompt: null, userPrompt: null };
+
+  if (trace.request?.api_protocol === "responses") {
+    return {
+      systemPrompt: typeof body.instructions === "string" ? body.instructions : null,
+      userPrompt: typeof body.input === "string" ? formatUserPrompt(body.input) : null,
+    };
+  }
+
+  if (trace.request?.api_protocol === "chat_completions" && Array.isArray(body.messages)) {
+    const messages = body.messages.filter(
+      (message): message is Record<string, unknown> =>
+        typeof message === "object" && message !== null,
+    );
+    const contentForRole = (role: "system" | "user") => {
+      const contents = messages
+        .filter((message) => message.role === role && typeof message.content === "string")
+        .map((message) => message.content as string);
+      return contents.length > 0 ? contents.join("\n\n") : null;
+    };
+    const userPrompt = contentForRole("user");
+    return {
+      systemPrompt: contentForRole("system"),
+      userPrompt: userPrompt ? formatUserPrompt(userPrompt) : null,
+    };
+  }
+
+  return { systemPrompt: null, userPrompt: null };
+}
+
 export function AdminEvaluations() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [overview, setOverview] = useState<EvaluationOverview | null>(null);
@@ -343,7 +391,6 @@ export function AdminEvaluations() {
                 <div><span>Token</span><strong>{(selectedRun.input_tokens + selectedRun.output_tokens).toLocaleString()}</strong></div>
               </div>
               {selectedRun.failure_message && <p className="admin-message is-error"><XCircle size={15} />{selectedRun.failure_message}</p>}
-              <div className="evaluation-baselines"><span>随机基线 25%</span><span>永远选B 30.6%</span><span>排盘口径一致题 {percent(selectedRun.chart_aligned_accuracy)}（{selectedRun.chart_aligned_completed}题）</span>{selectedRun.case_31_completed > 0 && <span>case_31 {percent(selectedRun.case_31_accuracy)}</span>}</div>
             </section>
 
             <section className="evaluation-breakdown-grid">
@@ -418,13 +465,13 @@ function EvaluationItemRow({
       <td>{item.benchmark_year}<small>{item.category}</small></td>
       <td><strong>{item.predicted_answer ?? "—"}</strong></td>
       <td><strong>{item.correct_answer}</strong></td>
-      <td>{item.status === "pending" ? <span className="evaluation-result is-pending"><LoaderCircle className="spin" size={12} />等待</span> : item.status === "error" ? <span className="evaluation-result is-error"><AlertCircle size={12} />错误</span> : item.is_correct ? <span className="evaluation-result is-correct"><CheckCircle2 size={12} />正确</span> : <span className="evaluation-result is-wrong"><XCircle size={12} />答错</span>}</td>
+      <td>{item.status === "pending" ? <span className="evaluation-result is-pending"><Clock3 size={12} />等待</span> : item.status === "running" ? <span className="evaluation-result is-running"><LoaderCircle className="spin" size={12} />生成中</span> : item.status === "error" ? <span className="evaluation-result is-error"><AlertCircle size={12} />错误</span> : item.is_correct ? <span className="evaluation-result is-correct"><CheckCircle2 size={12} />正确</span> : <span className="evaluation-result is-wrong"><XCircle size={12} />答错</span>}</td>
       <td>{item.latency_ms === null ? "—" : `${(item.latency_ms / 1000).toFixed(1)}秒`}</td>
       <td>
         <button
           className="evaluation-trace-button"
           type="button"
-          disabled={item.status === "pending" || loadingTrace}
+          disabled={item.status === "pending" || item.status === "running" || loadingTrace}
           onClick={onOpenTrace}
         >
           {loadingTrace ? <LoaderCircle className="spin" size={13} /> : <Workflow size={13} />}
@@ -447,6 +494,7 @@ function EvaluationTraceModal({
     : trace.request?.api_protocol === "chat_completions"
       ? "OpenAI Chat Completions"
       : "—";
+  const { systemPrompt, userPrompt } = evaluationPrompts(trace);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -511,6 +559,14 @@ function EvaluationTraceModal({
           </ol>
 
           <div className="agent-debug-details">
+            <details open>
+              <summary>系统提示词</summary>
+              <pre>{systemPrompt ?? "该记录没有可用的系统提示词。"}</pre>
+            </details>
+            <details open>
+              <summary>用户提示词</summary>
+              <pre>{userPrompt ?? "该记录没有可用的用户提示词。"}</pre>
+            </details>
             <details>
               <summary>模型请求体</summary>
               <pre>{trace.request

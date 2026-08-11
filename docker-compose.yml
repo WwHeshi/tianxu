@@ -28,7 +28,7 @@ services:
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
       BACKEND_CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
-      MINGLI_BENCH_DATA_PATH: /app/evaluation_data/data.json
+      MINGLI_BENCH_DATA_PATH: /app/evaluation_data/data_tianxu.json
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

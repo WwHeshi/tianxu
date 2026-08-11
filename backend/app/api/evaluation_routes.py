@@ -113,34 +113,12 @@ def _breakdown(
     return values
 
 
-def _subset_accuracy(
-    items: list[EvaluationItem],
-    predicate: Callable[[EvaluationItem], bool],
-) -> tuple[float | None, int]:
-    finished = [
-        item
-        for item in items
-        if predicate(item) and item.status in {"completed", "error"}
-    ]
-    return _accuracy(sum(item.is_correct for item in finished), len(finished)), len(finished)
-
-
 def _run_detail(run: EvaluationRun, items: list[EvaluationItem]) -> EvaluationRunDetail:
     summary = _run_summary(run).model_dump()
-    aligned_accuracy, aligned_completed = _subset_accuracy(
-        items, lambda item: item.case_id != "case_31"
-    )
-    case_31_accuracy, case_31_completed = _subset_accuracy(
-        items, lambda item: item.case_id == "case_31"
-    )
     return EvaluationRunDetail(
         **summary,
         by_year=_breakdown(items, lambda item: str(item.benchmark_year)),
         by_category=_breakdown(items, lambda item: item.category),
-        chart_aligned_accuracy=aligned_accuracy,
-        chart_aligned_completed=aligned_completed,
-        case_31_accuracy=case_31_accuracy,
-        case_31_completed=case_31_completed,
     )
 
 
@@ -419,8 +397,13 @@ async def get_evaluation_item_trace(
     item = await repository.get_item(run_id, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="评测题目不存在")
-    if item.status == "pending":
-        raise HTTPException(status_code=409, detail="该题尚未完成，暂时没有执行链路")
+    if item.status in {"pending", "running"}:
+        detail = (
+            "该题正在调用模型，执行链路将在完成后提供"
+            if item.status == "running"
+            else "该题尚未开始"
+        )
+        raise HTTPException(status_code=409, detail=detail)
     return _item_trace(item)
 
 

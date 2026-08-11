@@ -20,12 +20,13 @@ from app.evals.mingli_bench.context import (
 from app.evals.mingli_bench.dataset import load_dataset
 from app.evals.mingli_bench.model_client import (
     EvaluationAnswer,
+    EvaluationModelError,
     EvaluationModelResult,
     request_evaluation_answer,
 )
 from app.evals.mingli_bench.repository import EvaluationRepository
 from app.main import app
-from app.models import Base, EvaluationRun, ModelCredential
+from app.models import Base, EvaluationItem, EvaluationRun, ModelCredential
 
 
 @pytest_asyncio.fixture
@@ -92,6 +93,31 @@ def test_dataset_adapter_separates_questions_from_labels() -> None:
         for year in (2022, 2023, 2024, 2025)
     ] == [40, 40, 40, 40]
     assert len(dataset.select_questions(scope="quick", benchmark_year=None)) == 5
+    assert dataset.path.name == "data_tianxu.json"
+    anchored_question = dataset.get_question("ftb_0012")
+    assert "截至2022年" in anchored_question.question
+    assert target_years(anchored_question) == (2022,)
+
+
+def test_tianxu_dataset_has_no_relative_time_wording() -> None:
+    dataset = load_dataset()
+    relative_markers = (
+        "目前",
+        "现在",
+        "現時",
+        "當前",
+        "当前",
+        "至今",
+        "如今",
+        "现今",
+        "現今",
+    )
+    model_text = "\n".join(
+        text
+        for question in dataset.questions
+        for text in (question.question, *(option.text for option in question.options))
+    )
+    assert not any(marker in model_text for marker in relative_markers)
 
 
 def test_evaluation_prompt_has_no_label_and_includes_target_fortune() -> None:
@@ -102,6 +128,23 @@ def test_evaluation_prompt_has_no_label_and_includes_target_fortune() -> None:
 
     assert target_years(question) == (1996,)
     assert context["tianxu_chart"]["fortune"]["target_years"]["1996"]
+    assert "benchmark" not in context
+    assert context["birth"] == {
+        "gender": "男",
+        "year": 1974,
+        "month": 4,
+        "day": 28,
+        "hour": 16,
+        "minute": 40,
+        "calendar_type": "solar",
+        "country": "usa",
+        "location": "usa",
+    }
+    assert "calculation_policy" not in context["tianxu_chart"]
+    year_pillar = context["tianxu_chart"]["pillars"]["year"]
+    assert "self_growth_stage" not in year_pillar
+    assert "element" not in year_pillar["heavenly_stem"]
+    assert "polarity" not in year_pillar["heavenly_stem"]
     assert dataset.answer_for(question.id) not in {"", None}
     assert "correct_answer" not in prompt
     assert "has_answer" not in prompt
@@ -180,6 +223,65 @@ async def test_model_client_requests_strict_answer_json() -> None:
         "C",
         "D",
     ]
+    assert observed["max_output_tokens"] == 65_536
+    assert observed["text"]["format"]["schema"]["properties"]["reasoning_summary"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120,
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_completion_reports_reasoning_length_exhaustion() -> None:
+    observed: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(__import__("json").loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "index": 0,
+                        "message": {
+                            "content": "",
+                            "reasoning_content": "尚未完成的内部推理",
+                            "role": "assistant",
+                        },
+                    }
+                ],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 2048},
+            },
+        )
+
+    run = EvaluationRun(
+        dataset_name="test",
+        dataset_sha256="0" * 64,
+        dataset_question_count=1,
+        scope="quick",
+        mode="tianxu_fortune",
+        max_concurrency=1,
+        provider="openai",
+        api_protocol="chat_completions",
+        model="reasoning-model",
+        base_url="https://example.test/v1",
+        prompt_version="test",
+        engine_version="test",
+        calculation_policy_version="v2",
+        total_questions=1,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(EvaluationModelError, match="推理耗尽输出长度限制"):
+            await request_evaluation_answer(
+                run=run,
+                api_key="secret",
+                user_prompt="question without answer",
+                client=client,
+            )
+
+    assert observed["max_tokens"] == 65_536
+    assert observed["messages"][0]["content"].startswith("你是天序八字选择题分类器")
 
 
 @pytest.mark.asyncio
@@ -302,7 +404,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v1",
+            prompt_version="mingli-eval-v4",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,
@@ -312,6 +414,10 @@ async def test_worker_persists_score_and_progress(
             questions=(question,),
             dataset=dataset,
         )
+        created_items = await EvaluationRepository(session).all_items(run.id)
+        created_item_id = created_items[0].id
+        created_items[0].status = "running"
+        await session.commit()
 
     class FakeCipher:
         @classmethod
@@ -321,7 +427,13 @@ async def test_worker_persists_score_and_progress(
         def decrypt(self, *_args, **_kwargs):
             return "test-key"
 
+    statuses_during_model_call: list[str] = []
+
     async def fake_model_call(**_kwargs) -> EvaluationModelResult:
+        async with session_factory() as session:
+            active_item = await session.get(EvaluationItem, created_item_id)
+            assert active_item is not None
+            statuses_during_model_call.append(active_item.status)
         return EvaluationModelResult(
             answer=EvaluationAnswer(
                 answer=dataset.answer_for(question.id),
@@ -357,6 +469,7 @@ async def test_worker_persists_score_and_progress(
     assert saved_run.completed_questions == 1
     assert saved_run.correct_answers == 1
     assert saved_run.input_tokens == 100
+    assert statuses_during_model_call == ["running"]
     assert items[0].is_correct is True
     assert items[0].predicted_answer == dataset.answer_for(question.id)
     assert items[0].request_snapshot["headers"]["Authorization"] == "Bearer [REDACTED]"

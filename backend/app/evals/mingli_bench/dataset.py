@@ -92,9 +92,9 @@ def _candidate_paths() -> tuple[Path, ...]:
     workspace_root = Path(__file__).resolve().parents[4]
     candidates = [
         Path(configured) if configured else None,
-        Path("/app/evaluation_data/data.json"),
-        backend_root / "evaluation_data" / "data.json",
-        workspace_root / "external" / "MingLi-Bench" / "data" / "data.json",
+        Path("/app/evaluation_data/data_tianxu.json"),
+        backend_root / "evaluation_data" / "data_tianxu.json",
+        workspace_root / "external" / "MingLi-Bench" / "data" / "data_tianxu.json",
     ]
     return tuple(path.resolve() for path in candidates if path is not None)
 
@@ -127,7 +127,7 @@ def _load_dataset_at(path_text: str) -> MingLiDataset:
     try:
         payload = json.loads(raw_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise DatasetUnavailableError("MingLi-Bench data.json 不是有效的 UTF-8 JSON") from exc
+        raise DatasetUnavailableError("MingLi-Bench 天序数据集不是有效的 UTF-8 JSON") from exc
     raw_questions = payload.get("questions") if isinstance(payload, dict) else None
     if not isinstance(raw_questions, list) or len(raw_questions) != EXPECTED_QUESTION_COUNT:
         raise DatasetUnavailableError(

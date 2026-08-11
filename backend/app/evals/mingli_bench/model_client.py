@@ -14,12 +14,13 @@ from ...models import EvaluationRun
 from .context import SYSTEM_PROMPT
 
 MODEL_TIMEOUT_SECONDS = 90.0
+MAX_OUTPUT_TOKENS = 65_536
 ANSWER_JSON_SCHEMA = {
     "type": "object",
     "properties": {
         "answer": {"type": "string", "enum": ["A", "B", "C", "D"]},
         "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
-        "reasoning_summary": {"type": "string"},
+        "reasoning_summary": {"type": "string", "minLength": 1, "maxLength": 120},
     },
     "required": ["answer", "confidence", "reasoning_summary"],
     "additionalProperties": False,
@@ -89,6 +90,10 @@ def _chat_text(payload: dict[str, Any]) -> str:
     message = choices[0].get("message")
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str) or not content.strip():
+        if choices[0].get("finish_reason") == "length":
+            raise EvaluationModelError(
+                "模型推理耗尽输出长度限制，未生成最终答案 JSON"
+            )
         raise EvaluationModelError("模型没有返回可用的评测答案")
     return content
 
@@ -136,7 +141,7 @@ async def request_evaluation_answer(
             "model": run.model,
             "instructions": SYSTEM_PROMPT,
             "input": user_prompt,
-            "max_output_tokens": 400,
+            "max_output_tokens": MAX_OUTPUT_TOKENS,
             "store": False,
             "text": {
                 "format": {
@@ -154,12 +159,11 @@ async def request_evaluation_answer(
             "messages": [
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT
-                    + "\n只输出 JSON 对象，不要输出 Markdown 或额外文字。",
+                    "content": SYSTEM_PROMPT,
                 },
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": 400,
+            "max_tokens": MAX_OUTPUT_TOKENS,
             "stream": False,
         }
     else:

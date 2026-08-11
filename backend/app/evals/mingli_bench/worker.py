@@ -92,10 +92,35 @@ async def _pending_items(run_id: UUID) -> list[EvaluationItem]:
     async with SessionFactory() as session:
         result = await session.execute(
             select(EvaluationItem)
-            .where(EvaluationItem.run_id == run_id, EvaluationItem.status == "pending")
+            .where(
+                EvaluationItem.run_id == run_id,
+                EvaluationItem.status.in_(("pending", "running")),
+            )
             .order_by(EvaluationItem.id)
         )
-        return list(result.scalars())
+        items = list(result.scalars())
+        recovered = False
+        for item in items:
+            if item.status == "running":
+                item.status = "pending"
+                recovered = True
+        if recovered:
+            await session.commit()
+        return items
+
+
+async def _mark_items_running(run_id: UUID, item_ids: list[int]) -> None:
+    async with SessionFactory() as session:
+        result = await session.execute(
+            select(EvaluationItem).where(
+                EvaluationItem.run_id == run_id,
+                EvaluationItem.id.in_(item_ids),
+                EvaluationItem.status == "pending",
+            )
+        )
+        for item in result.scalars():
+            item.status = "running"
+        await session.commit()
 
 
 async def _score_one(
@@ -194,7 +219,7 @@ async def _persist_outcomes(run_id: UUID, outcomes: list[ItemOutcome]) -> None:
         items = {item.id: item for item in result.scalars()}
         for outcome in outcomes:
             item = items.get(outcome.item_id)
-            if item is None or item.status != "pending":
+            if item is None or item.status != "running":
                 continue
             item.predicted_answer = outcome.predicted_answer
             item.is_correct = outcome.is_correct
@@ -280,6 +305,7 @@ async def execute_evaluation_run(run_id: UUID) -> None:
                     await _set_run_state(run_id, "cancelled")
                     return
                 batch = pending[start : start + run.max_concurrency]
+                await _mark_items_running(run_id, [item.id for item in batch])
                 outcomes = await asyncio.gather(
                     *[
                         _score_one(

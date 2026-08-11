@@ -106,10 +106,6 @@ export interface EvaluationBreakdown {
 export interface EvaluationRunDetail extends EvaluationRunSummary {
   by_year: EvaluationBreakdown[];
   by_category: EvaluationBreakdown[];
-  chart_aligned_accuracy: number | null;
-  chart_aligned_completed: number;
-  case_31_accuracy: number | null;
-  case_31_completed: number;
 }
 
 export interface EvaluationOverview {
@@ -144,7 +140,7 @@ export interface EvaluationItem {
   correct_answer: string;
   predicted_answer: string | null;
   is_correct: boolean;
-  status: "pending" | "completed" | "error";
+  status: "pending" | "running" | "completed" | "error";
   confidence: number | null;
   reasoning_summary: string | null;
   error_message: string | null;

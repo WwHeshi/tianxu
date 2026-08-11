@@ -11,17 +11,25 @@ from ...bazi.engine import calculate_chart
 from ...schemas import BirthInput, ChartPreviewResponse, FortunePillar, Pillar
 from .dataset import EvaluationQuestion
 
-PROMPT_VERSION = "mingli-eval-v1"
+PROMPT_VERSION = "mingli-eval-v4"
 YEAR_PATTERN = re.compile(r"(?<!\d)(?:18|19|20)\d{2}(?!\d)")
-RELATIVE_TIME_PATTERN = re.compile(r"目前|现在|現時|當前|当前|至今|如今|现今|現今")
 AGE_PATTERN = re.compile(r"岁|歲|大运|大運|大限")
 
-SYSTEM_PROMPT = """你是天序八字选择题评测助手。
-输入中的四柱、十神、藏干、神煞、大运和流年由确定性排盘引擎计算完成，不得重新排盘或改写四柱。
-这是对公开历史选择题的封闭分类评测，不是对现实个人作确定性断言，也不构成医疗、法律或投资建议。
-请比较四个选项，选择传统八字语境下最符合输入命盘的一项。
-只返回指定 JSON；answer 必须是 A、B、C、D 之一；confidence 为 0 到 100 的整数；
-reasoning_summary 使用不超过 120 个汉字概括依据，不输出详细思维链。"""
+SYSTEM_PROMPT = """你是天序八字选择题分类器，唯一任务是从 A、B、C、D 中选出最符合命盘的一项。
+输入中的四柱、十神、藏干、神煞、大运和流年已由确定性排盘引擎计算完成。必须直接采用输入结果，不得重新排盘、改写四柱或质疑计算口径。
+这是公开历史选择题的封闭分类评测，不是对现实个人作确定性断言，也不构成医疗、法律或投资建议。
+
+必须遵守以下输出规则：
+1. 即使依据不足或存在不确定性，也必须选择一个最可能的选项，不得拒答、追问或只给分析。
+2. 不得输出详细推理过程、Markdown、代码围栏、前言、后记、道歉或任何额外文字。
+3. 可见回答必须直接以“{”开始、以“}”结束，并且只能包含一个合法 JSON 对象。
+4. JSON 必须且只能包含 answer、confidence、reasoning_summary 三个字段。
+5. answer 必须是 A、B、C、D 之一；confidence 必须是 0 到 100 的整数。
+6. reasoning_summary 必须在 120 个汉字以内，只概括最关键依据。
+   不要进行长篇推演，优先确保完整输出 JSON。
+
+严格按此格式返回：
+{"answer":"A","confidence":75,"reasoning_summary":"简要依据"}"""
 
 
 def chart_for_question(question: EvaluationQuestion) -> ChartPreviewResponse:
@@ -40,8 +48,6 @@ def chart_for_question(question: EvaluationQuestion) -> ChartPreviewResponse:
 def _component(component: Any) -> dict[str, Any]:
     return {
         "symbol": component.symbol,
-        "element": component.element,
-        "polarity": component.polarity,
         "ten_god": getattr(component, "ten_god", None),
     }
 
@@ -51,11 +57,10 @@ def _pillar(pillar: Pillar) -> dict[str, Any]:
         "gan_zhi": pillar.gan_zhi,
         "heavenly_stem": _component(pillar.heavenly_stem),
         "earthly_branch": {
-            **_component(pillar.earthly_branch),
+            "symbol": pillar.earthly_branch.symbol,
             "hidden_stems": [_component(stem) for stem in pillar.earthly_branch.hidden_stems],
         },
         "growth_stage": pillar.growth_stage,
-        "self_growth_stage": pillar.self_growth_stage,
         "xun_kong": pillar.xun_kong,
         "na_yin": pillar.na_yin,
         "shen_sha": pillar.shen_sha,
@@ -67,8 +72,8 @@ def _fortune_pillar(pillar: FortunePillar | None) -> dict[str, Any] | None:
         return None
     return {
         "gan_zhi": pillar.gan_zhi,
-        "heavenly_stem": _component(pillar.heavenly_stem),
-        "earthly_branch": _component(pillar.earthly_branch),
+        "stem_ten_god": pillar.heavenly_stem.ten_god,
+        "branch_ten_god": pillar.earthly_branch.ten_god,
     }
 
 
@@ -79,8 +84,6 @@ def _question_text(question: EvaluationQuestion) -> str:
 def target_years(question: EvaluationQuestion) -> tuple[int, ...]:
     text = _question_text(question)
     years = {int(value) for value in YEAR_PATTERN.findall(text)}
-    if RELATIVE_TIME_PATTERN.search(text):
-        years.add(question.benchmark_year)
     return tuple(sorted(years))
 
 
@@ -92,7 +95,7 @@ def _fortune_context(
 ) -> dict[str, Any]:
     cycles = chart.chart.fortune_cycles
     if cycles is None:
-        return {"available": False, "target_years": {}, "big_luck_schedule": []}
+        return {"target_years": {}, "big_luck_schedule": []}
     year_context: dict[str, list[dict[str, Any]]] = {str(year): [] for year in years}
     for period in cycles.big_luck_periods:
         for annual in period.years:
@@ -104,18 +107,16 @@ def _fortune_context(
                     "nominal_age_sui": annual.nominal_age,
                     "annual_pillar": _fortune_pillar(annual.pillar),
                     "big_luck_pillar": _fortune_pillar(period.pillar),
-                    "big_luck_index": period.index,
-                    "effective_from": annual.segment_start_solar_datetime.isoformat(),
-                    "effective_until_exclusive": annual.segment_end_solar_datetime.isoformat(),
-                    "transition_phase": annual.transition_phase,
+                    "effective_from": annual.segment_start_solar_datetime.date().isoformat(),
+                    "effective_until_exclusive": (
+                        annual.segment_end_solar_datetime.date().isoformat()
+                    ),
                 }
             )
     schedule = []
     if include_schedule:
         schedule = [
             {
-                "index": period.index,
-                "phase": "before_start" if period.is_before_start else "active_luck",
                 "start_year": period.start_year,
                 "end_year": period.end_year,
                 "start_nominal_age": period.start_nominal_age,
@@ -125,8 +126,6 @@ def _fortune_context(
             for period in cycles.big_luck_periods
         ]
     return {
-        "available": True,
-        "direction": cycles.direction,
         "target_years": year_context,
         "big_luck_schedule": schedule,
     }
@@ -140,18 +139,18 @@ def build_evaluation_context(
     years = target_years(question)
     pillars = chart.chart.pillars
     return {
-        "benchmark": {
-            "question_id": question.id,
-            "reference_year": question.benchmark_year,
-            "relative_time_rule": "目前、现在、至今等词按 reference_year 解释",
-        },
         "birth": {
-            "published_text": question.birth_info.get("raw"),
-            "published_clock_policy": "按题面钟表时间排盘，不作地点或真太阳时修正",
             "gender": question.birth_info.get("gender"),
+            "year": question.birth_info.get("year"),
+            "month": question.birth_info.get("month"),
+            "day": question.birth_info.get("day"),
+            "hour": question.birth_info.get("hour"),
+            "minute": question.birth_info.get("minute"),
+            "calendar_type": question.birth_info.get("calendar_type"),
+            "country": question.birth_info.get("country"),
+            "location": question.birth_info.get("location"),
         },
         "tianxu_chart": {
-            "calculation_policy": chart.calculation_policy.model_dump(mode="json"),
             "pillars": {
                 "year": _pillar(pillars.year),
                 "month": _pillar(pillars.month),
