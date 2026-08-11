@@ -218,6 +218,12 @@ export function getEvaluationRun(runId: string): Promise<EvaluationRunDetail> {
   });
 }
 
+export function deleteEvaluationRun(runId: string): Promise<void> {
+  return requestJson<void>(`/api/v1/admin/evaluations/runs/${runId}`, {
+    method: "DELETE",
+  });
+}
+
 export function getEvaluationItems(
   runId: string,
   result?: "correct" | "incorrect" | "error",

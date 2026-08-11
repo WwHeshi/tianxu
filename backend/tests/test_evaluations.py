@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from uuid import UUID
 
@@ -13,8 +14,11 @@ from app.credentials import LOCAL_CREDENTIAL_SCOPE
 from app.database import get_session
 from app.evals.mingli_bench import worker
 from app.evals.mingli_bench.context import (
+    SYSTEM_PROMPT,
     build_evaluation_prompt,
+    build_evaluation_tool_observation,
     chart_for_question,
+    chart_tool_input_for_question,
     target_years,
 )
 from app.evals.mingli_bench.dataset import load_dataset
@@ -120,36 +124,42 @@ def test_tianxu_dataset_has_no_relative_time_wording() -> None:
     assert not any(marker in model_text for marker in relative_markers)
 
 
-def test_evaluation_prompt_has_no_label_and_includes_target_fortune() -> None:
+def test_evaluation_prompt_is_natural_text_without_chart_or_label() -> None:
     dataset = load_dataset()
     question = dataset.get_question("ftb_0001")
-    chart = chart_for_question(question)
-    prompt, context, prompt_hash = build_evaluation_prompt(question, chart)
+    prompt, context, prompt_hash = build_evaluation_prompt(question)
 
     assert target_years(question) == (1996,)
-    assert context["tianxu_chart"]["fortune"]["target_years"]["1996"]
-    assert "benchmark" not in context
-    assert context["birth"] == {
-        "gender": "男",
-        "year": 1974,
-        "month": 4,
-        "day": 28,
-        "hour": 16,
-        "minute": 40,
-        "calendar_type": "solar",
-        "country": "usa",
-        "location": "usa",
-    }
-    assert "calculation_policy" not in context["tianxu_chart"]
-    year_pillar = context["tianxu_chart"]["pillars"]["year"]
-    assert "self_growth_stage" not in year_pillar
-    assert "element" not in year_pillar["heavenly_stem"]
-    assert "polarity" not in year_pillar["heavenly_stem"]
+    assert context["birth"]["raw"] == question.birth_info["raw"]
+    assert context["birth"]["gender"] == "male"
+    assert context["birth"]["true_solar_datetime"] == "1974-04-28T16:40:00"
+    assert prompt.startswith("请完成以下天序命理选择题：\n原始出生资料：")
+    assert "性别：male\n真太阳出生时间：1974-04-28T16:40:00\n题目：" in prompt
+    assert "\n选项：\nA. " in prompt
+    assert "benchmark" not in prompt.lower()
+    assert "tianxu_chart" not in prompt
+    assert '"birth"' not in prompt
     assert dataset.answer_for(question.id) not in {"", None}
     assert "correct_answer" not in prompt
     assert "has_answer" not in prompt
     assert "正确答案" not in prompt
     assert len(prompt_hash) == 64
+
+
+def test_evaluation_tool_observation_contains_target_fortune() -> None:
+    dataset = load_dataset()
+    question = dataset.get_question("ftb_0001")
+    observation = build_evaluation_tool_observation(
+        question,
+        chart_for_question(question),
+    )
+
+    assert observation["fortune"]["target_years"]["1996"]
+    assert "calculation_policy" not in observation
+    year_pillar = observation["pillars"]["year"]
+    assert "self_growth_stage" not in year_pillar
+    assert "element" not in year_pillar["heavenly_stem"]
+    assert "polarity" not in year_pillar["heavenly_stem"]
 
 
 def test_tianxu_evaluation_chart_uses_sect_one_and_lichun_year() -> None:
@@ -174,6 +184,7 @@ def test_tianxu_evaluation_chart_uses_sect_one_and_lichun_year() -> None:
 async def test_model_client_requests_strict_answer_json() -> None:
     observed: dict = {}
     observed_headers: dict[str, str] = {}
+    question = load_dataset().get_question("ftb_0001")
 
     async def handler(request: httpx.Request) -> httpx.Response:
         observed.update(__import__("json").loads(request.content))
@@ -207,6 +218,7 @@ async def test_model_client_requests_strict_answer_json() -> None:
             run=run,
             api_key="secret",
             user_prompt="question without answer",
+            question=question,
             client=client,
         )
 
@@ -217,6 +229,10 @@ async def test_model_client_requests_strict_answer_json() -> None:
     assert result.request_snapshot["headers"]["Authorization"] == "Bearer [REDACTED]"
     assert "secret" not in __import__("json").dumps(result.request_snapshot)
     assert observed["text"]["format"]["strict"] is True
+    assert observed["instructions"] == SYSTEM_PROMPT
+    assert observed["tool_choice"] == "auto"
+    assert observed["parallel_tool_calls"] is False
+    assert observed["tools"][0]["name"] == "calculate_bazi_chart"
     assert observed["text"]["format"]["schema"]["properties"]["answer"]["enum"] == [
         "A",
         "B",
@@ -232,8 +248,89 @@ async def test_model_client_requests_strict_answer_json() -> None:
 
 
 @pytest.mark.asyncio
+async def test_model_client_runs_action_observation_final_loop() -> None:
+    question = load_dataset().get_question("ftb_0001")
+    expected_input = chart_tool_input_for_question(question).model_dump(mode="json")
+    observed_bodies: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_bodies.append(json.loads(request.content))
+        if len(observed_bodies) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_chart_1",
+                            "name": "calculate_bazi_chart",
+                            "arguments": json.dumps(expected_input),
+                        }
+                    ],
+                    "usage": {"input_tokens": 100, "output_tokens": 10},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output_text": (
+                    '{"answer":"C","confidence":82,'
+                    '"reasoning_summary":"命盘与目标年份信息相符"}'
+                ),
+                "usage": {"input_tokens": 180, "output_tokens": 20},
+            },
+        )
+
+    run = EvaluationRun(
+        dataset_name="test",
+        dataset_sha256="0" * 64,
+        dataset_question_count=1,
+        scope="quick",
+        mode="tianxu_fortune",
+        max_concurrency=1,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://example.test/v1",
+        prompt_version="test",
+        engine_version="test",
+        calculation_policy_version="v2",
+        total_questions=1,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await request_evaluation_answer(
+            run=run,
+            api_key="secret",
+            user_prompt="question without answer",
+            question=question,
+            client=client,
+            chart_cache={},
+        )
+
+    assert result.answer.answer == "C"
+    assert result.input_tokens == 280
+    assert result.output_tokens == 30
+    assert len(observed_bodies) == 2
+    assert len(result.request_snapshot["model_calls"]) == 2
+    assert [call["stage"] for call in result.request_snapshot["model_calls"]] == [
+        "action_selection",
+        "final_answer",
+    ]
+    assert len(result.request_snapshot["tool_executions"]) == 1
+    assert result.request_snapshot["tool_executions"][0]["input"] == expected_input
+    second_input = observed_bodies[1]["input"]
+    assert any(item.get("type") == "function_call" for item in second_input)
+    observation = next(
+        item for item in second_input if item.get("type") == "function_call_output"
+    )
+    assert observation["call_id"] == "call_chart_1"
+    assert "pillars" in json.loads(observation["output"])
+
+
+@pytest.mark.asyncio
 async def test_chat_completion_reports_reasoning_length_exhaustion() -> None:
     observed: dict = {}
+    question = load_dataset().get_question("ftb_0001")
 
     async def handler(request: httpx.Request) -> httpx.Response:
         observed.update(__import__("json").loads(request.content))
@@ -272,16 +369,25 @@ async def test_chat_completion_reports_reasoning_length_exhaustion() -> None:
         total_questions=1,
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(EvaluationModelError, match="推理耗尽输出长度限制"):
+        with pytest.raises(
+            EvaluationModelError,
+            match="推理耗尽输出长度限制",
+        ) as exc_info:
             await request_evaluation_answer(
                 run=run,
                 api_key="secret",
                 user_prompt="question without answer",
+                question=question,
                 client=client,
             )
 
     assert observed["max_tokens"] == 65_536
-    assert observed["messages"][0]["content"].startswith("你是天序八字选择题分类器")
+    assert observed["messages"][0]["content"] == SYSTEM_PROMPT
+    assert observed["tool_choice"] == "auto"
+    assert observed["tools"][0]["function"]["name"] == "calculate_bazi_chart"
+    assert exc_info.value.input_tokens == 100
+    assert exc_info.value.output_tokens == 2048
+    assert len(exc_info.value.request_snapshot["model_calls"]) == 1
 
 
 @pytest.mark.asyncio
@@ -356,7 +462,39 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
                 "Authorization": "Bearer [REDACTED]",
                 "Content-Type": "application/json",
             },
-            "body": {"model": "test-model", "input": "answer-free prompt"},
+            "body": {"model": "test-model", "input": [{"round": 2}]},
+            "system_prompt": "system prompt",
+            "user_prompt": "answer-free prompt",
+            "model_calls": [
+                {
+                    "sequence": 1,
+                    "stage": "action_selection",
+                    "request_body": {"model": "test-model", "input": [{"round": 1}]},
+                    "response_body": {"output": [{"type": "function_call"}]},
+                    "duration_ms": 6,
+                    "status_code": 200,
+                },
+                {
+                    "sequence": 2,
+                    "stage": "final_answer",
+                    "request_body": {"model": "test-model", "input": [{"round": 2}]},
+                    "response_body": {"output_text": '{"answer":"A"}'},
+                    "duration_ms": 7,
+                    "status_code": 200,
+                },
+            ],
+            "tool_executions": [
+                {
+                    "sequence": 1,
+                    "name": "calculate_bazi_chart",
+                    "input": {
+                        "gender": "male",
+                        "true_solar_datetime": "1974-04-28T16:40:00",
+                    },
+                    "output": {"pillars": {}},
+                    "duration_ms": 2,
+                }
+            ],
         }
         saved_items[0].response_status_code = 200
         saved_items[0].raw_response = {"id": "response-test"}
@@ -367,6 +505,23 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
     )
     assert trace.status_code == 200
     assert trace.json()["request"]["headers"]["Authorization"] == "Bearer [REDACTED]"
+    assert trace.json()["system_prompt"] == "system prompt"
+    assert trace.json()["user_prompt"] == "answer-free prompt"
+    assert [call["stage"] for call in trace.json()["model_calls"]] == [
+        "action_selection",
+        "final_answer",
+    ]
+    assert len(trace.json()["tool_executions"]) == 1
+    assert [step["title"] for step in trace.json()["steps"]] == [
+        "读取评测题目",
+        "组装 ReAct 任务",
+        "响应 1 · Action",
+        "执行工具 1",
+        "Observation 1",
+        "响应 2 · Final",
+        "解析并评分",
+    ]
+    assert all(step["status"] == "completed" for step in trace.json()["steps"])
     assert trace.json()["response"] == {
         "status_code": 200,
         "body": {"id": "response-test"},
@@ -381,6 +536,26 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
     assert len(exported_json.json()["items"]) == 5
     assert exported_csv.status_code == 200
     assert exported_csv.content.startswith(b"\xef\xbb\xbfquestion_id,")
+
+    active_delete = await client.delete(
+        f"/api/v1/admin/evaluations/runs/{started.json()['id']}"
+    )
+    assert active_delete.status_code == 409
+    async with session_factory() as session:
+        saved_run = await session.get(EvaluationRun, UUID(started.json()["id"]))
+        assert saved_run is not None
+        saved_run.status = "completed"
+        await session.commit()
+    deleted = await client.delete(
+        f"/api/v1/admin/evaluations/runs/{started.json()['id']}"
+    )
+    assert deleted.status_code == 204
+    assert (
+        await client.get(f"/api/v1/admin/evaluations/runs/{started.json()['id']}")
+    ).status_code == 404
+    async with session_factory() as session:
+        assert await session.get(EvaluationRun, UUID(started.json()["id"])) is None
+        assert await EvaluationRepository(session).all_items(UUID(started.json()["id"])) == []
 
 
 @pytest.mark.asyncio
@@ -404,7 +579,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v4",
+            prompt_version="mingli-eval-v5-react-text",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,

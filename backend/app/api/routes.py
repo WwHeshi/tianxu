@@ -21,12 +21,15 @@ from ..reports import (
     REPORT_SCHEMA_VERSION,
     ModelOutputFormatError,
     ModelProviderError,
+    ReportGenerationResult,
     generate_structured_report,
     test_model_connection,
 )
 from ..schemas import (
     AgentDebugTrace,
+    AgentModelCallDebug,
     AgentRequestDebug,
+    AgentToolExecutionDebug,
     AgentTraceStep,
     BirthInput,
     ChartPreviewResponse,
@@ -44,6 +47,172 @@ router = APIRouter(prefix="/api/v1")
 CredentialRepositoryDependency = Annotated[
     ModelCredentialRepository, Depends(get_credential_repository)
 ]
+
+
+def _report_model_calls(
+    execution: ReportGenerationResult | ModelOutputFormatError,
+) -> list[AgentModelCallDebug]:
+    calls = execution.model_calls
+    if not calls:
+        return [
+            AgentModelCallDebug(
+                sequence=1,
+                stage="final_answer",
+                request_body=execution.request_body,
+                response_body=execution.raw_response,
+                duration_ms=execution.model_latency_ms,
+            )
+        ]
+    return [
+        AgentModelCallDebug(
+            sequence=index,
+            stage=call.stage,
+            request_body=call.request_body,
+            response_body=call.raw_response,
+            duration_ms=call.latency_ms,
+        )
+        for index, call in enumerate(calls, start=1)
+    ]
+
+
+def _report_tool_executions(
+    execution: ReportGenerationResult | ModelOutputFormatError,
+) -> list[AgentToolExecutionDebug]:
+    return [
+        AgentToolExecutionDebug(
+            sequence=index,
+            name=item.name,
+            input=item.input,
+            output=item.output,
+            duration_ms=item.duration_ms,
+        )
+        for index, item in enumerate(execution.tool_executions, start=1)
+    ]
+
+
+def _report_debug_trace(
+    *,
+    execution: ReportGenerationResult | ModelOutputFormatError,
+    credential: ModelCredential,
+    normalization_duration_ms: int,
+    validation_error: str | None = None,
+) -> AgentDebugTrace:
+    model_calls = _report_model_calls(execution)
+    tool_executions = _report_tool_executions(execution)
+    steps = [
+        AgentTraceStep(
+            id="normalize",
+            title="标准化出生资料",
+            category="deterministic",
+            status="completed",
+            detail="后端校验输入并换算真太阳时间，生成排盘工具的确定参数。",
+            duration_ms=normalization_duration_ms,
+        ),
+        AgentTraceStep(
+            id="prompt",
+            title="组装 ReAct 任务",
+            category="prompt",
+            status="completed",
+            detail="用户提示词只包含报告任务及 gender、true_solar_datetime 工具参数。",
+        ),
+    ]
+    tool_index = 0
+    final_seen = False
+    for call in model_calls:
+        if call.stage == "action_selection":
+            tool_execution = (
+                tool_executions[tool_index]
+                if tool_index < len(tool_executions)
+                else None
+            )
+            steps.append(
+                AgentTraceStep(
+                    id=f"action_{call.sequence}",
+                    title=f"响应 {call.sequence} · Action",
+                    category="model",
+                    status="completed" if tool_execution is not None else "failed",
+                    detail=(
+                        "模型发起 calculate_bazi_chart 工具调用。"
+                        if tool_execution is not None
+                        else validation_error or "模型生成的工具调用无效。"
+                    ),
+                    duration_ms=call.duration_ms,
+                )
+            )
+            if tool_execution is not None:
+                steps.extend(
+                    [
+                        AgentTraceStep(
+                            id=f"tool_{tool_execution.sequence}",
+                            title=f"执行工具 {tool_execution.sequence}",
+                            category="tool",
+                            status="completed",
+                            detail="后端校验参数后调用确定性排盘引擎。",
+                            duration_ms=tool_execution.duration_ms,
+                        ),
+                        AgentTraceStep(
+                            id=f"observation_{tool_execution.sequence}",
+                            title=f"Observation {tool_execution.sequence}",
+                            category="context",
+                            status="completed",
+                            detail="向下一轮模型响应返回精简命盘与当前运势。",
+                        ),
+                    ]
+                )
+                tool_index += 1
+            continue
+
+        final_seen = True
+        steps.extend(
+            [
+                AgentTraceStep(
+                    id=f"final_{call.sequence}",
+                    title=f"响应 {call.sequence} · Final",
+                    category="model",
+                    status="completed",
+                    detail="模型结束 ReAct 循环并返回固定八章节报告。",
+                    duration_ms=call.duration_ms,
+                ),
+                AgentTraceStep(
+                    id="validation",
+                    title="校验报告结构",
+                    category="validation",
+                    status="failed" if validation_error else "completed",
+                    detail=(
+                        validation_error
+                        or "使用 Pydantic 校验八个固定章节，拒绝缺失或额外字段。"
+                    ),
+                ),
+            ]
+        )
+    if validation_error and not final_seen and tool_index == len(tool_executions):
+        steps.append(
+            AgentTraceStep(
+                id="guard",
+                title="终止 ReAct 循环",
+                category="validation",
+                status="failed",
+                detail=validation_error,
+            )
+        )
+    return AgentDebugTrace(
+        steps=steps,
+        system_prompt=execution.system_prompt,
+        user_prompt=execution.user_prompt,
+        request=AgentRequestDebug(
+            method="POST",
+            endpoint=execution.endpoint,
+            provider=credential.provider,
+            api_protocol=credential.api_protocol,
+            model=credential.model,
+            request_count=len(model_calls),
+            body=execution.request_body,
+        ),
+        raw_response=execution.raw_response,
+        model_calls=model_calls,
+        tool_executions=tool_executions,
+        redacted=["API 密钥", "Authorization 请求头", "模型内部推理文本"],
+    )
 
 
 def _model_settings_response(
@@ -261,59 +430,11 @@ async def generate_report(
     except ModelOutputFormatError as exc:
         if user.role != "admin":
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        debug_trace = AgentDebugTrace(
-            steps=[
-                AgentTraceStep(
-                    id="chart",
-                    title="服务端重新排盘",
-                    category="deterministic",
-                    status="completed",
-                    detail="后端根据 BirthInput 重新计算命盘，不采用客户端命盘 JSON。",
-                    duration_ms=chart_duration_ms,
-                ),
-                AgentTraceStep(
-                    id="context",
-                    title="裁剪模型上下文",
-                    category="context",
-                    status="completed",
-                    detail="保留四柱及派生数据，只选取当前大运、流年和流月。",
-                ),
-                AgentTraceStep(
-                    id="prompt",
-                    title="组装提示词",
-                    category="prompt",
-                    status="completed",
-                    detail="组合固定系统约束、用户指令与精简命盘上下文。",
-                ),
-                AgentTraceStep(
-                    id="model",
-                    title="调用模型",
-                    category="model",
-                    status="completed",
-                    detail=f"通过 {credential.api_protocol} 协议发起一次无工具模型请求。",
-                    duration_ms=exc.model_latency_ms,
-                ),
-                AgentTraceStep(
-                    id="validation",
-                    title="校验报告结构",
-                    category="validation",
-                    status="failed",
-                    detail=str(exc),
-                ),
-            ],
-            system_prompt=exc.system_prompt,
-            user_prompt=exc.user_prompt,
-            request=AgentRequestDebug(
-                method="POST",
-                endpoint=exc.endpoint,
-                provider=credential.provider,
-                api_protocol=credential.api_protocol,
-                model=credential.model,
-                request_count=1,
-                body=exc.request_body,
-            ),
-            raw_response=exc.raw_response,
-            redacted=["API 密钥", "Authorization 请求头"],
+        debug_trace = _report_debug_trace(
+            execution=exc,
+            credential=credential,
+            normalization_duration_ms=chart_duration_ms,
+            validation_error=str(exc),
         )
         raise HTTPException(
             status_code=502,
@@ -333,59 +454,10 @@ async def generate_report(
             schema_version=REPORT_SCHEMA_VERSION,
             engine_version=ENGINE_VERSION,
         ),
-        debug_trace=AgentDebugTrace(
-            steps=[
-                AgentTraceStep(
-                    id="chart",
-                    title="服务端重新排盘",
-                    category="deterministic",
-                    status="completed",
-                    detail="后端根据 BirthInput 重新计算命盘，不采用客户端命盘 JSON。",
-                    duration_ms=chart_duration_ms,
-                ),
-                AgentTraceStep(
-                    id="context",
-                    title="裁剪模型上下文",
-                    category="context",
-                    status="completed",
-                    detail="保留四柱及派生数据，只选取当前大运、流年和流月。",
-                ),
-                AgentTraceStep(
-                    id="prompt",
-                    title="组装提示词",
-                    category="prompt",
-                    status="completed",
-                    detail="组合固定系统约束、用户指令与精简命盘上下文。",
-                ),
-                AgentTraceStep(
-                    id="model",
-                    title="调用模型",
-                    category="model",
-                    status="completed",
-                    detail=f"通过 {credential.api_protocol} 协议发起一次无工具模型请求。",
-                    duration_ms=execution.model_latency_ms,
-                ),
-                AgentTraceStep(
-                    id="validation",
-                    title="校验报告结构",
-                    category="validation",
-                    status="completed",
-                    detail="使用 Pydantic 校验八个固定章节，拒绝缺失或额外字段。",
-                ),
-            ],
-            system_prompt=execution.system_prompt,
-            user_prompt=execution.user_prompt,
-            request=AgentRequestDebug(
-                method="POST",
-                endpoint=execution.endpoint,
-                provider=credential.provider,
-                api_protocol=credential.api_protocol,
-                model=credential.model,
-                request_count=1,
-                body=execution.request_body,
-            ),
-            raw_response=execution.raw_response,
-            redacted=["API 密钥", "Authorization 请求头"],
+        debug_trace=_report_debug_trace(
+            execution=execution,
+            credential=credential,
+            normalization_duration_ms=chart_duration_ms,
         )
         if user.role == "admin"
         else None,

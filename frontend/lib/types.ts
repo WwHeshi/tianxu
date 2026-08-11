@@ -158,6 +158,7 @@ export interface EvaluationItemList {
 export interface EvaluationTraceStep {
   id: string;
   title: string;
+  category: "deterministic" | "context" | "prompt" | "model" | "tool" | "validation";
   status: "completed" | "failed";
   detail: string;
   duration_ms: number | null;
@@ -180,6 +181,23 @@ export interface EvaluationItemTrace {
     status_code: number | null;
     body: Record<string, unknown> | null;
   };
+  system_prompt: string | null;
+  user_prompt: string | null;
+  model_calls: Array<{
+    sequence: number;
+    stage: string;
+    request_body: Record<string, unknown>;
+    response_body: Record<string, unknown>;
+    duration_ms: number;
+    status_code: number | null;
+  }>;
+  tool_executions: Array<{
+    sequence: number;
+    name: string;
+    input: Record<string, unknown>;
+    output: Record<string, unknown>;
+    duration_ms: number | null;
+  }>;
   prompt_sha256: string | null;
   redacted: string[];
 }
@@ -439,7 +457,7 @@ export interface BaziReport {
 export interface AgentTraceStep {
   id: string;
   title: string;
-  category: "deterministic" | "context" | "prompt" | "model" | "validation";
+  category: "deterministic" | "context" | "prompt" | "model" | "tool" | "validation";
   status: "completed" | "failed";
   detail: string;
   duration_ms: number | null;
@@ -455,10 +473,24 @@ export interface AgentDebugTrace {
     provider: string;
     api_protocol: ModelApiProtocol;
     model: string;
-    request_count: 1;
+    request_count: number;
     body: Record<string, unknown>;
   };
   raw_response: Record<string, unknown>;
+  model_calls: Array<{
+    sequence: number;
+    stage: "action_selection" | "final_answer";
+    request_body: Record<string, unknown>;
+    response_body: Record<string, unknown>;
+    duration_ms: number;
+  }>;
+  tool_executions: Array<{
+    sequence: number;
+    name: string;
+    input: Record<string, unknown>;
+    output: Record<string, unknown>;
+    duration_ms: number | null;
+  }>;
   redacted: string[];
 }
 

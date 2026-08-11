@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from datetime import datetime
 from uuid import uuid4
@@ -14,9 +15,12 @@ from app.credentials import LOCAL_CREDENTIAL_SCOPE, get_credential_repository
 from app.main import app
 from app.models import ModelCredential, User
 from app.reports import (
+    MAX_REACT_MODEL_CALLS,
     ModelOutputFormatError,
     ModelProviderError,
     ReportGenerationResult,
+    ReportModelCall,
+    ReportToolExecution,
     build_report_context,
     generate_structured_report,
 )
@@ -223,6 +227,31 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
             request_body={"model": "test-model", "input": "user prompt"},
             raw_response={"output_text": sample_report().model_dump_json()},
             model_latency_ms=12,
+            model_calls=(
+                ReportModelCall(
+                    stage="action_selection",
+                    request_body={"input": "user prompt", "tools": [{}]},
+                    raw_response={"output": [{"type": "function_call"}]},
+                    latency_ms=5,
+                ),
+                ReportModelCall(
+                    stage="final_answer",
+                    request_body={"input": [{"type": "function_call_output"}]},
+                    raw_response={"output_text": sample_report().model_dump_json()},
+                    latency_ms=7,
+                ),
+            ),
+            tool_executions=(
+                ReportToolExecution(
+                    name="calculate_bazi_chart",
+                    input={
+                        "gender": "male",
+                        "true_solar_datetime": "1990-01-01T11:30:33",
+                    },
+                    output={"pillars": {"day": {"gan_zhi": "丙寅"}}},
+                    duration_ms=1,
+                ),
+            ),
         )
 
     monkeypatch.setattr(routes, "generate_structured_report", fake_generate)
@@ -233,15 +262,19 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v10"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v13-react-text"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
-        "chart",
-        "context",
+        "normalize",
         "prompt",
-        "model",
+        "action_1",
+        "tool_1",
+        "observation_1",
+        "final_2",
         "validation",
     ]
+    assert data["debug_trace"]["request"]["request_count"] == 2
+    assert data["debug_trace"]["tool_executions"][0]["name"] == "calculate_bazi_chart"
     assert data["debug_trace"]["system_prompt"] == "system prompt"
     assert "sk-test-super-secret-6789" not in response.text
     assert captured["api_key"] == "sk-test-super-secret-6789"
@@ -355,8 +388,158 @@ def test_report_context_omits_full_fortune_timeline() -> None:
     assert "transition" not in serialized
 
 
+def test_agent_debug_trace_uses_actual_react_response_count() -> None:
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    execution = ReportGenerationResult(
+        report=sample_report(),
+        context={"pillars": {}},
+        system_prompt="system",
+        user_prompt="user",
+        endpoint="https://api.openai.com/v1/responses",
+        request_body={"round": 3},
+        raw_response={"output_text": sample_report().model_dump_json()},
+        model_latency_ms=18,
+        model_calls=(
+            ReportModelCall("action_selection", {"round": 1}, {"action": 1}, 5),
+            ReportModelCall("action_selection", {"round": 2}, {"action": 2}, 6),
+            ReportModelCall("final_answer", {"round": 3}, {"final": True}, 7),
+        ),
+        tool_executions=(
+            ReportToolExecution("calculate_bazi_chart", {"round": 1}, {"chart": 1}, 1),
+            ReportToolExecution("calculate_bazi_chart", {"round": 2}, {"chart": 2}, 1),
+        ),
+    )
+
+    trace = routes._report_debug_trace(
+        execution=execution,
+        credential=credential,
+        normalization_duration_ms=2,
+    )
+
+    assert trace.request.request_count == 3
+    assert len(trace.model_calls) == 3
+    assert len(trace.tool_executions) == 2
+    assert [step.id for step in trace.steps] == [
+        "normalize",
+        "prompt",
+        "action_1",
+        "tool_1",
+        "observation_1",
+        "action_2",
+        "tool_2",
+        "observation_2",
+        "final_3",
+        "validation",
+    ]
+
+
 @pytest.mark.asyncio
-async def test_model_request_is_one_shot_structured_and_has_no_tools() -> None:
+async def test_responses_report_uses_react_tool_loop() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_chart_1",
+                            "name": "calculate_bazi_chart",
+                            "arguments": json.dumps(
+                                {
+                                    "gender": "male",
+                                    "true_solar_datetime": "1990-01-01T11:30:33",
+                                }
+                            ),
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": sample_report().model_dump_json()}
+                        ],
+                    }
+                ]
+            },
+        )
+
+    execution = await generate_structured_report(
+        chart=chart,
+        credential=credential,
+        api_key="sk-test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert execution.report.chart_overview == "命盘概览内容"
+    assert "output" in execution.raw_response
+    assert "normalized_input" not in execution.context
+    assert "calendar" not in execution.context
+    assert "element_distribution" not in execution.context
+    assert "calculation_policy" not in execution.context
+    assert "engine" not in execution.context
+    assert "limitations" not in execution.context
+    assert "day_master" not in execution.context
+    assert "chart_reliability_warnings" not in execution.context
+    assert len(requests) == 2
+    first_body = json.loads(requests[0].content)
+    second_body = json.loads(requests[1].content)
+    assert first_body["tool_choice"] == "auto"
+    assert first_body["tools"][0]["name"] == "calculate_bazi_chart"
+    assert "pillars" not in first_body["input"][0]["content"]
+    user_content = first_body["input"][0]["content"]
+    assert "性别：male" in user_content
+    assert "真太阳出生时间：1990-01-01T11:30:33" in user_content
+    assert "{" not in user_content
+    assert "}" not in user_content
+    assert "calculate_bazi_chart" not in user_content
+    assert "ReAct" not in user_content
+    assert "Observation" not in user_content
+    assert second_body["tool_choice"] == "auto"
+    assert second_body["text"]["format"]["type"] == "json_schema"
+    assert second_body["input"][-1]["type"] == "function_call_output"
+    assert "big_luck_periods" not in second_body["input"][-1]["output"]
+    assert len(execution.model_calls) == 2
+    assert execution.tool_executions[0].input == {
+        "gender": "male",
+        "true_solar_datetime": "1990-01-01T11:30:33",
+    }
+
+
+@pytest.mark.asyncio
+async def test_react_agent_accepts_direct_final_without_tool_call() -> None:
     chart = calculate_chart(BirthInput.model_validate(valid_payload()))
     credential = ModelCredential(
         id=1,
@@ -395,21 +578,190 @@ async def test_model_request_is_one_shot_structured_and_has_no_tools() -> None:
         transport=httpx.MockTransport(handler),
     )
 
-    assert execution.report.chart_overview == "命盘概览内容"
-    assert "output" in execution.raw_response
-    assert "normalized_input" not in execution.context
-    assert "calendar" not in execution.context
-    assert "element_distribution" not in execution.context
-    assert "calculation_policy" not in execution.context
-    assert "engine" not in execution.context
-    assert "limitations" not in execution.context
-    assert "day_master" not in execution.context
-    assert "chart_reliability_warnings" not in execution.context
     assert len(requests) == 1
-    body = requests[0].read().decode()
-    assert '"type":"json_schema"' in body
-    assert '"tools"' not in body
-    assert "big_luck_periods" not in body
+    assert [call.stage for call in execution.model_calls] == ["final_answer"]
+    assert execution.tool_executions == ()
+    assert execution.context == {
+        "birth": {
+            "gender": "male",
+            "true_solar_datetime": "1990-01-01T11:30:33",
+        }
+    }
+    request_body = json.loads(requests[0].content)
+    assert request_body["tool_choice"] == "auto"
+    assert "标准化出生资料" in request_body["input"][0]["content"]
+    assert "calculate_bazi_chart" not in request_body["input"][0]["content"]
+    assert "{" not in request_body["input"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_react_loop_tracks_each_model_response_dynamically() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) <= 2:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": f"call_chart_{len(requests)}",
+                            "name": "calculate_bazi_chart",
+                            "arguments": json.dumps(
+                                {
+                                    "gender": "male",
+                                    "true_solar_datetime": "1990-01-01T11:30:33",
+                                }
+                            ),
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": sample_report().model_dump_json()}
+                        ],
+                    }
+                ]
+            },
+        )
+
+    execution = await generate_structured_report(
+        chart=chart,
+        credential=credential,
+        api_key="sk-test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert len(requests) == 3
+    assert [call.stage for call in execution.model_calls] == [
+        "action_selection",
+        "action_selection",
+        "final_answer",
+    ]
+    assert len(execution.tool_executions) == 2
+    third_body = json.loads(requests[2].content)
+    assert sum(item.get("type") == "function_call_output" for item in third_body["input"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_react_loop_stops_after_safety_limit() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    request_count = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": f"call_chart_loop_{request_count}",
+                        "name": "calculate_bazi_chart",
+                        "arguments": json.dumps(
+                            {
+                                "gender": "male",
+                                "true_solar_datetime": "1990-01-01T11:30:33",
+                            }
+                        ),
+                    }
+                ]
+            },
+        )
+
+    with pytest.raises(ModelOutputFormatError, match="安全终止") as captured:
+        await generate_structured_report(
+            chart=chart,
+            credential=credential,
+            api_key="sk-test",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert request_count == MAX_REACT_MODEL_CALLS
+    assert len(captured.value.model_calls) == MAX_REACT_MODEL_CALLS
+    assert len(captured.value.tool_executions) == MAX_REACT_MODEL_CALLS
+
+
+@pytest.mark.asyncio
+async def test_react_agent_rejects_modified_tool_arguments() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_chart_modified",
+                        "name": "calculate_bazi_chart",
+                        "arguments": json.dumps(
+                            {
+                                "gender": "female",
+                                "true_solar_datetime": "1990-01-01T11:30:33",
+                            }
+                        ),
+                    }
+                ]
+            },
+        )
+
+    with pytest.raises(ModelOutputFormatError, match="擅自修改") as captured:
+        await generate_structured_report(
+            chart=chart,
+            credential=credential,
+            api_key="sk-test",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert len(captured.value.model_calls) == 1
+    assert captured.value.tool_executions == ()
 
 
 @pytest.mark.asyncio
@@ -436,7 +788,30 @@ async def test_invalid_model_report_preserves_response_for_debugging() -> None:
         ]
     }
 
+    request_count = 0
+
     def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        if request_count == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_chart_invalid_report",
+                            "name": "calculate_bazi_chart",
+                            "arguments": json.dumps(
+                                {
+                                    "gender": "male",
+                                    "true_solar_datetime": "1990-01-01T11:30:33",
+                                }
+                            ),
+                        }
+                    ]
+                },
+            )
         return httpx.Response(200, json=raw_response)
 
     with pytest.raises(ModelOutputFormatError) as captured:
@@ -449,6 +824,8 @@ async def test_invalid_model_report_preserves_response_for_debugging() -> None:
 
     assert captured.value.raw_response == raw_response
     assert captured.value.model_latency_ms >= 0
+    assert len(captured.value.model_calls) == 2
+    assert len(captured.value.tool_executions) == 1
 
 
 @pytest.mark.asyncio
@@ -470,6 +847,37 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call_chart_chat_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "calculate_bazi_chart",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "gender": "male",
+                                                    "true_solar_datetime": (
+                                                        "1990-01-01T11:30:33"
+                                                    ),
+                                                }
+                                            ),
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+            )
         return httpx.Response(
             200,
             json={
@@ -493,16 +901,19 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
 
     assert execution.report.chart_overview == "命盘概览内容"
     assert "choices" in execution.raw_response
-    assert len(requests) == 1
+    assert len(requests) == 2
     assert requests[0].url.path == "/api/paas/v4/chat/completions"
-    body = requests[0].read().decode()
-    assert '"messages"' in body
-    assert "必须且只能包含以下 8 个字段" in body
-    assert "chart_overview：命盘整体概述" in body
-    assert "不要输出 Markdown 代码块" in body
-    assert "auxiliary_shen_sha 仅作辅助参考" in body
-    assert '"tools"' not in body
-    assert "big_luck_periods" not in body
+    first_body = json.loads(requests[0].content)
+    second_body = json.loads(requests[1].content)
+    assert first_body["tool_choice"] == "auto"
+    assert first_body["tools"][0]["function"]["name"] == "calculate_bazi_chart"
+    assert "必须且只能包含以下 8 个字段" in first_body["messages"][0]["content"]
+    assert "chart_overview：命盘整体概述" in first_body["messages"][0]["content"]
+    assert "不要输出 Markdown 代码块" in first_body["messages"][0]["content"]
+    assert "auxiliary_shen_sha 仅作辅助参考" in first_body["messages"][0]["content"]
+    assert second_body["tool_choice"] == "auto"
+    assert second_body["messages"][-1]["role"] == "tool"
+    assert "big_luck_periods" not in second_body["messages"][-1]["content"]
 
 
 @pytest.mark.asyncio

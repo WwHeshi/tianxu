@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { AgentDebugModal as SharedAgentDebugModal } from "@/components/agent-debug-modal";
 import {
   deleteModelSettings,
   generateReport,
@@ -1163,90 +1164,20 @@ function AgentDebugModal({
     ? "OpenAI Responses"
     : "OpenAI Chat Completions";
 
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
   return (
-    <div
-      className="modal-backdrop agent-debug-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        className="agent-debug-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agent-debug-title"
-      >
-        <div className="agent-debug-panel">
-          <div className="agent-debug-heading">
-            <div>
-              <p className="eyebrow">DEBUG TRACE</p>
-              <h4 id="agent-debug-title">Agent 执行链路</h4>
-            </div>
-            <div className="agent-debug-heading-actions">
-              <button className="icon-button" type="button" onClick={onClose} aria-label="关闭执行链路">
-                <X size={17} aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-          <dl className="agent-trace-meta">
-            <div><dt>协议</dt><dd>{protocolLabel}</dd></div>
-            <div><dt>模型</dt><dd title={trace.request.model}>{trace.request.model}</dd></div>
-            <div><dt>地址</dt><dd title={trace.request.endpoint}>{trace.request.endpoint}</dd></div>
-          </dl>
-          <ol className="agent-trace-timeline">
-            {trace.steps.map((step, index) => (
-              <li key={step.id} data-category={step.category} data-status={step.status}>
-                <span className="agent-trace-marker">
-                  {step.status === "failed"
-                    ? <AlertCircle size={15} aria-hidden="true" />
-                    : <CheckCircle2 size={15} aria-hidden="true" />}
-                </span>
-                <div>
-                  <div className="agent-trace-title">
-                    <span>{String(index + 1).padStart(2, "0")}</span>
-                    <strong>{step.title}</strong>
-                    {step.duration_ms !== null && <small>{step.duration_ms} ms</small>}
-                  </div>
-                  <p>{step.detail}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-
-          <div className="agent-debug-details">
-            <details>
-              <summary>系统提示词</summary>
-              <pre>{trace.system_prompt}</pre>
-            </details>
-            <details>
-              <summary>用户提示词</summary>
-              <pre>{trace.user_prompt}</pre>
-            </details>
-            <details>
-              <summary>模型请求快照</summary>
-              <pre>{JSON.stringify(trace.request.body, null, 2)}</pre>
-            </details>
-            <details>
-              <summary>模型原始响应</summary>
-              <pre>{JSON.stringify(trace.raw_response, null, 2)}</pre>
-            </details>
-          </div>
-
-          <p className="agent-debug-redacted">
-            已隐藏：{trace.redacted.join("、")}
-          </p>
-        </div>
-      </section>
-    </div>
+    <SharedAgentDebugModal
+      protocolLabel={protocolLabel}
+      model={trace.request.model}
+      modelCallCount={trace.request.request_count}
+      toolExecutionCount={trace.tool_executions.length}
+      endpoint={trace.request.endpoint}
+      steps={trace.steps}
+      systemPrompt={trace.system_prompt}
+      userPrompt={trace.user_prompt}
+      modelCalls={trace.model_calls}
+      redacted={trace.redacted}
+      onClose={onClose}
+    />
   );
 }
 

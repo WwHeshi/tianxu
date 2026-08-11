@@ -13,8 +13,9 @@ from ...auth import utc_now
 from ...credentials import LOCAL_CREDENTIAL_SCOPE, ModelCredentialRepository
 from ...database import SessionFactory
 from ...models import EvaluationItem, EvaluationRun
+from ...schemas import ChartPreviewResponse
 from ...security import SecretCipher
-from .context import build_evaluation_prompt, chart_for_question
+from .context import build_evaluation_prompt
 from .dataset import EvaluationQuestion, load_dataset
 from .model_client import (
     EvaluationModelError,
@@ -130,14 +131,10 @@ async def _score_one(
     run: EvaluationRun,
     api_key: str,
     client: httpx.AsyncClient,
-    chart_cache: dict[str, object],
+    chart_cache: dict[str, ChartPreviewResponse],
 ) -> ItemOutcome:
     try:
-        chart = chart_cache.get(question.case_id)
-        if chart is None:
-            chart = chart_for_question(question)
-            chart_cache[question.case_id] = chart
-        user_prompt, _, prompt_sha256 = build_evaluation_prompt(question, chart)
+        user_prompt, _, prompt_sha256 = build_evaluation_prompt(question)
     except Exception as exc:
         return ItemOutcome(
             item_id=item.id,
@@ -157,13 +154,18 @@ async def _score_one(
         )
 
     last_error: EvaluationModelError | None = None
+    prior_input_tokens = 0
+    prior_output_tokens = 0
+    prior_latency_ms = 0
     for attempt in range(3):
         try:
             result = await request_evaluation_answer(
                 run=run,
                 api_key=api_key,
                 user_prompt=user_prompt,
+                question=question,
                 client=client,
+                chart_cache=chart_cache,
             )
             predicted = result.answer.answer
             return ItemOutcome(
@@ -174,9 +176,9 @@ async def _score_one(
                 confidence=result.answer.confidence,
                 reasoning_summary=result.answer.reasoning_summary,
                 error_message=None,
-                latency_ms=result.latency_ms,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
+                latency_ms=prior_latency_ms + result.latency_ms,
+                input_tokens=prior_input_tokens + result.input_tokens,
+                output_tokens=prior_output_tokens + result.output_tokens,
                 prompt_sha256=prompt_sha256,
                 request_snapshot=result.request_snapshot,
                 response_status_code=result.response_status_code,
@@ -184,6 +186,9 @@ async def _score_one(
             )
         except EvaluationModelError as exc:
             last_error = exc
+            prior_input_tokens += exc.input_tokens
+            prior_output_tokens += exc.output_tokens
+            prior_latency_ms += exc.latency_ms or 0
             if not exc.retryable or attempt == 2:
                 break
             await asyncio.sleep(2**attempt)
@@ -197,9 +202,9 @@ async def _score_one(
         confidence=None,
         reasoning_summary=None,
         error_message=str(last_error),
-        latency_ms=None,
-        input_tokens=0,
-        output_tokens=0,
+        latency_ms=prior_latency_ms or None,
+        input_tokens=prior_input_tokens,
+        output_tokens=prior_output_tokens,
         prompt_sha256=prompt_sha256,
         request_snapshot=last_error.request_snapshot,
         response_status_code=last_error.response_status_code,
@@ -297,7 +302,7 @@ async def execute_evaluation_run(run_id: UUID) -> None:
         await _set_run_state(run_id, "completed")
         return
 
-    chart_cache: dict[str, object] = {}
+    chart_cache: dict[str, ChartPreviewResponse] = {}
     try:
         async with httpx.AsyncClient(timeout=model_timeout()) as client:
             for start in range(0, len(pending), run.max_concurrency):

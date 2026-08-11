@@ -365,7 +365,7 @@ class ReportMetadata(BaseModel):
 class AgentTraceStep(BaseModel):
     id: str
     title: str
-    category: Literal["deterministic", "context", "prompt", "model", "validation"]
+    category: Literal["deterministic", "context", "prompt", "model", "tool", "validation"]
     status: Literal["completed", "failed"]
     detail: str
     duration_ms: int | None = None
@@ -377,8 +377,24 @@ class AgentRequestDebug(BaseModel):
     provider: str
     api_protocol: ApiProtocol
     model: str
-    request_count: Literal[1]
+    request_count: int = Field(ge=1)
     body: dict[str, Any]
+
+
+class AgentModelCallDebug(BaseModel):
+    sequence: int = Field(ge=1)
+    stage: Literal["action_selection", "final_answer"]
+    request_body: dict[str, Any]
+    response_body: dict[str, Any]
+    duration_ms: int
+
+
+class AgentToolExecutionDebug(BaseModel):
+    sequence: int = Field(ge=1)
+    name: str
+    input: dict[str, Any]
+    output: dict[str, Any]
+    duration_ms: int | None = None
 
 
 class AgentDebugTrace(BaseModel):
@@ -387,6 +403,8 @@ class AgentDebugTrace(BaseModel):
     user_prompt: str
     request: AgentRequestDebug
     raw_response: dict[str, Any]
+    model_calls: list[AgentModelCallDebug] = Field(default_factory=list)
+    tool_executions: list[AgentToolExecutionDebug] = Field(default_factory=list)
     redacted: list[str]
 
 

@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from typing import Any
 
-from ...bazi.engine import calculate_chart
-from ...schemas import BirthInput, ChartPreviewResponse, FortunePillar, Pillar
+from ...bazi.tool import BaziChartToolInput, run_bazi_chart_tool
+from ...schemas import ChartPreviewResponse, FortunePillar, Pillar
 from .dataset import EvaluationQuestion
 
-PROMPT_VERSION = "mingli-eval-v4"
+PROMPT_VERSION = "mingli-eval-v5-react-text"
 YEAR_PATTERN = re.compile(r"(?<!\d)(?:18|19|20)\d{2}(?!\d)")
 AGE_PATTERN = re.compile(r"岁|歲|大运|大運|大限")
 
-SYSTEM_PROMPT = """你是天序八字选择题分类器，唯一任务是从 A、B、C、D 中选出最符合命盘的一项。
-输入中的四柱、十神、藏干、神煞、大运和流年已由确定性排盘引擎计算完成。必须直接采用输入结果，不得重新排盘、改写四柱或质疑计算口径。
+SYSTEM_PROMPT = """你是采用 ReAct 工作方式的天序八字选择题 Agent。
+唯一任务是从 A、B、C、D 中选出最符合命盘的一项。
+你可以按需调用 calculate_bazi_chart，也可以直接返回最终答案。
+如果调用工具，其 Observation 是权威命盘事实，不得重新排盘、改写四柱或质疑计算口径。
 这是公开历史选择题的封闭分类评测，不是对现实个人作确定性断言，也不构成医疗、法律或投资建议。
 
 必须遵守以下输出规则：
@@ -32,7 +33,15 @@ SYSTEM_PROMPT = """你是天序八字选择题分类器，唯一任务是从 A�
 {"answer":"A","confidence":75,"reasoning_summary":"简要依据"}"""
 
 
-def chart_for_question(question: EvaluationQuestion) -> ChartPreviewResponse:
+def chart_tool_input_for_question(question: EvaluationQuestion) -> BaziChartToolInput:
+    """Build the tool input from the benchmark's authoritative chart clock.
+
+    MingLi-Bench does not contain coordinates precise enough to recalculate
+    apparent solar time. To preserve all existing evaluation results, its
+    published birth clock continues to be treated as the already-normalized
+    chart time.
+    """
+
     birth = question.birth_info
     gender = {"男": "male", "女": "female"}.get(str(birth.get("gender")), "other")
     try:
@@ -42,7 +51,14 @@ def chart_for_question(question: EvaluationQuestion) -> ChartPreviewResponse:
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"题目 {question.id} 的出生时间无效") from exc
-    return calculate_chart(BirthInput(beijing_datetime=chart_datetime, gender=gender))
+    return BaziChartToolInput(
+        gender=gender,
+        true_solar_datetime=chart_datetime,
+    )
+
+
+def chart_for_question(question: EvaluationQuestion) -> ChartPreviewResponse:
+    return run_bazi_chart_tool(chart_tool_input_for_question(question))
 
 
 def _component(component: Any) -> dict[str, Any]:
@@ -170,15 +186,41 @@ def build_evaluation_context(
     }
 
 
-def build_evaluation_prompt(
+def build_evaluation_tool_observation(
     question: EvaluationQuestion,
     chart: ChartPreviewResponse,
+) -> dict[str, Any]:
+    return build_evaluation_context(question, chart)["tianxu_chart"]
+
+
+def build_evaluation_prompt(
+    question: EvaluationQuestion,
 ) -> tuple[str, dict[str, Any], str]:
-    context = build_evaluation_context(question, chart)
-    user_prompt = "请完成以下天序命理选择题：\n" + json.dumps(
-        context,
-        ensure_ascii=False,
-        separators=(",", ":"),
+    tool_input = chart_tool_input_for_question(question)
+    context = {
+        "birth": {
+            "raw": question.birth_info.get("raw"),
+            "gender": tool_input.gender.value,
+            "true_solar_datetime": tool_input.true_solar_datetime.isoformat(
+                timespec="seconds"
+            ),
+        },
+        "question": question.question,
+        "options": [
+            {"letter": option.letter, "text": option.text}
+            for option in question.options
+        ],
+    }
+    option_text = "\n".join(
+        f"{option.letter}. {option.text}" for option in question.options
+    )
+    user_prompt = (
+        "请完成以下天序命理选择题：\n"
+        f"原始出生资料：{question.birth_info.get('raw') or '未提供'}\n"
+        f"性别：{tool_input.gender.value}\n"
+        f"真太阳出生时间：{tool_input.true_solar_datetime.isoformat(timespec='seconds')}\n"
+        f"题目：{question.question}\n"
+        f"选项：\n{option_text}"
     )
     forbidden = ("correct_answer", "has_answer", "正确答案", "正確答案")
     if any(marker in user_prompt for marker in forbidden):

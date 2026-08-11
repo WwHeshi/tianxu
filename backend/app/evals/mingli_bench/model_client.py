@@ -1,8 +1,9 @@
-"""One-shot structured model call for MingLi multiple-choice questions."""
+"""Dynamic single-tool ReAct model client for MingLi evaluations."""
 
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -10,8 +11,24 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
+from ...bazi.tool import BAZI_CHART_TOOL_NAME, run_bazi_chart_tool
 from ...models import EvaluationRun
-from .context import SYSTEM_PROMPT
+from ...react_agent import (
+    MAX_REACT_MODEL_CALLS,
+    ReactProtocolError,
+    chat_bazi_tool_definition,
+    chat_tool_call,
+    responses_bazi_tool_definition,
+    responses_tool_call,
+    validate_bazi_tool_input,
+)
+from ...schemas import ChartPreviewResponse
+from .context import (
+    SYSTEM_PROMPT,
+    build_evaluation_tool_observation,
+    chart_tool_input_for_question,
+)
+from .dataset import EvaluationQuestion
 
 MODEL_TIMEOUT_SECONDS = 90.0
 MAX_OUTPUT_TOKENS = 65_536
@@ -44,6 +61,8 @@ class EvaluationModelError(RuntimeError):
         response_status_code: int | None = None,
         raw_response: dict[str, Any] | None = None,
         latency_ms: int | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
@@ -52,6 +71,8 @@ class EvaluationModelError(RuntimeError):
         self.response_status_code = response_status_code
         self.raw_response = raw_response
         self.latency_ms = latency_ms
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
 
 
 @dataclass(frozen=True)
@@ -91,9 +112,7 @@ def _chat_text(payload: dict[str, Any]) -> str:
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str) or not content.strip():
         if choices[0].get("finish_reason") == "length":
-            raise EvaluationModelError(
-                "模型推理耗尽输出长度限制，未生成最终答案 JSON"
-            )
+            raise EvaluationModelError("模型推理耗尽输出长度限制，未生成最终答案 JSON")
         raise EvaluationModelError("模型没有返回可用的评测答案")
     return content
 
@@ -133,155 +152,280 @@ async def request_evaluation_answer(
     run: EvaluationRun,
     api_key: str,
     user_prompt: str,
+    question: EvaluationQuestion,
     client: httpx.AsyncClient,
+    chart_cache: dict[str, ChartPreviewResponse] | None = None,
 ) -> EvaluationModelResult:
+    expected_tool_input = chart_tool_input_for_question(question)
     if run.api_protocol == "responses":
         url = f"{run.base_url.rstrip('/')}/responses"
-        body = {
-            "model": run.model,
-            "instructions": SYSTEM_PROMPT,
-            "input": user_prompt,
-            "max_output_tokens": MAX_OUTPUT_TOKENS,
-            "store": False,
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "mingli_evaluation_answer",
-                    "strict": True,
-                    "schema": ANSWER_JSON_SCHEMA,
-                }
-            },
-        }
+        responses_input: list[dict[str, Any]] = [
+            {"role": "user", "content": user_prompt}
+        ]
+        chat_messages: list[dict[str, Any]] = []
     elif run.api_protocol == "chat_completions":
         url = f"{run.base_url.rstrip('/')}/chat/completions"
-        body = {
-            "model": run.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": SYSTEM_PROMPT,
-                },
-                {"role": "user", "content": user_prompt},
-            ],
-            "max_tokens": MAX_OUTPUT_TOKENS,
-            "stream": False,
-        }
+        responses_input = []
+        chat_messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
     else:
         raise EvaluationModelError("评测运行使用了不支持的模型协议", fatal=True)
 
-    request_headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    request_snapshot = {
-        "method": "POST",
-        "endpoint": url,
-        "provider": run.provider,
-        "api_protocol": run.api_protocol,
-        "model": run.model,
-        "headers": {
-            "Authorization": "Bearer [REDACTED]",
-            "Content-Type": "application/json",
-        },
-        "body": body,
-    }
+    model_calls: list[dict[str, Any]] = []
+    tool_executions: list[dict[str, Any]] = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_latency_ms = 0
+    last_body: dict[str, Any] = {}
+    last_payload: dict[str, Any] = {}
+    last_status_code: int | None = None
 
-    started = perf_counter()
-    try:
-        response = await client.post(
-            url,
-            headers=request_headers,
-            json=body,
-        )
-    except httpx.TimeoutException as exc:
-        raise EvaluationModelError(
-            "模型服务响应超时",
-            retryable=True,
-            request_snapshot=request_snapshot,
-            latency_ms=round((perf_counter() - started) * 1000),
-        ) from exc
-    except httpx.RequestError as exc:
-        raise EvaluationModelError(
-            "无法连接模型服务",
-            retryable=True,
-            request_snapshot=request_snapshot,
-            latency_ms=round((perf_counter() - started) * 1000),
-        ) from exc
-    latency_ms = round((perf_counter() - started) * 1000)
-    raw_response = _raw_response(response)
-    if response.status_code in {401, 403}:
-        raise EvaluationModelError(
-            "模型服务鉴权失败",
-            fatal=True,
-            request_snapshot=request_snapshot,
-            response_status_code=response.status_code,
-            raw_response=raw_response,
-            latency_ms=latency_ms,
-        )
-    if response.status_code == 404:
-        raise EvaluationModelError(
-            "模型接口或模型不存在",
-            fatal=True,
-            request_snapshot=request_snapshot,
-            response_status_code=response.status_code,
-            raw_response=raw_response,
-            latency_ms=latency_ms,
-        )
-    if response.status_code == 429 or response.status_code >= 500:
-        raise EvaluationModelError(
-            f"模型服务暂时不可用（HTTP {response.status_code}）",
-            retryable=True,
-            request_snapshot=request_snapshot,
-            response_status_code=response.status_code,
-            raw_response=raw_response,
-            latency_ms=latency_ms,
-        )
-    if not response.is_success:
-        raise EvaluationModelError(
-            f"模型调用失败（HTTP {response.status_code}）",
-            request_snapshot=request_snapshot,
-            response_status_code=response.status_code,
-            raw_response=raw_response,
-            latency_ms=latency_ms,
+    def snapshot(body: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "method": "POST",
+            "endpoint": url,
+            "provider": run.provider,
+            "api_protocol": run.api_protocol,
+            "model": run.model,
+            "headers": {
+                "Authorization": "Bearer [REDACTED]",
+                "Content-Type": "application/json",
+            },
+            "body": body,
+            "system_prompt": SYSTEM_PROMPT,
+            "user_prompt": user_prompt,
+            "model_calls": model_calls,
+            "tool_executions": tool_executions,
+        }
+
+    def output_error(message: str) -> EvaluationModelError:
+        return EvaluationModelError(
+            message,
+            request_snapshot=snapshot(last_body),
+            response_status_code=last_status_code,
+            raw_response=last_payload or None,
+            latency_ms=total_latency_ms,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
         )
 
-    try:
-        payload = raw_response
-        if not isinstance(payload, dict):
-            raise ValueError("response is not an object")
-        output_text = (
-            _responses_text(payload)
-            if run.api_protocol == "responses"
-            else _chat_text(payload)
+    for _ in range(MAX_REACT_MODEL_CALLS):
+        if run.api_protocol == "responses":
+            body = {
+                "model": run.model,
+                "instructions": SYSTEM_PROMPT,
+                "input": deepcopy(responses_input),
+                "tools": [responses_bazi_tool_definition()],
+                "tool_choice": "auto",
+                "parallel_tool_calls": False,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
+                "store": False,
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "mingli_evaluation_answer",
+                        "strict": True,
+                        "schema": ANSWER_JSON_SCHEMA,
+                    }
+                },
+            }
+        else:
+            body = {
+                "model": run.model,
+                "messages": deepcopy(chat_messages),
+                "tools": [chat_bazi_tool_definition()],
+                "tool_choice": "auto",
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "stream": False,
+            }
+        last_body = body
+        started = perf_counter()
+        try:
+            response = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+        except httpx.TimeoutException as exc:
+            total_latency_ms += round((perf_counter() - started) * 1000)
+            error = EvaluationModelError(
+                "模型服务响应超时",
+                retryable=True,
+                request_snapshot=snapshot(body),
+                latency_ms=total_latency_ms,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+            )
+            raise error from exc
+        except httpx.RequestError as exc:
+            total_latency_ms += round((perf_counter() - started) * 1000)
+            error = EvaluationModelError(
+                "无法连接模型服务",
+                retryable=True,
+                request_snapshot=snapshot(body),
+                latency_ms=total_latency_ms,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+            )
+            raise error from exc
+
+        latency_ms = round((perf_counter() - started) * 1000)
+        total_latency_ms += latency_ms
+        status_code = response.status_code
+        payload = _raw_response(response)
+        last_payload = payload
+        last_status_code = status_code
+        input_tokens, output_tokens = _usage(payload, run.api_protocol)
+        total_input_tokens += input_tokens
+        total_output_tokens += output_tokens
+
+        if not response.is_success:
+            model_calls.append(
+                {
+                    "sequence": len(model_calls) + 1,
+                    "stage": "error",
+                    "request_body": body,
+                    "response_body": payload,
+                    "duration_ms": latency_ms,
+                    "status_code": status_code,
+                }
+            )
+            if status_code in {401, 403}:
+                message, retryable, fatal = "模型服务鉴权失败", False, True
+            elif status_code == 404:
+                message, retryable, fatal = "模型接口或模型不存在", False, True
+            elif status_code == 429 or status_code >= 500:
+                message = f"模型服务暂时不可用（HTTP {status_code}）"
+                retryable, fatal = True, False
+            else:
+                message = f"模型调用失败（HTTP {status_code}）"
+                retryable, fatal = False, False
+            raise EvaluationModelError(
+                message,
+                retryable=retryable,
+                fatal=fatal,
+                request_snapshot=snapshot(body),
+                response_status_code=status_code,
+                raw_response=payload,
+                latency_ms=total_latency_ms,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+            )
+
+        try:
+            requested_call = (
+                responses_tool_call(payload)
+                if run.api_protocol == "responses"
+                else chat_tool_call(payload)
+            )
+        except ReactProtocolError as exc:
+            model_calls.append(
+                {
+                    "sequence": len(model_calls) + 1,
+                    "stage": "action_selection",
+                    "request_body": body,
+                    "response_body": payload,
+                    "duration_ms": latency_ms,
+                    "status_code": status_code,
+                }
+            )
+            raise output_error(str(exc)) from exc
+
+        stage = "action_selection" if requested_call is not None else "final_answer"
+        model_calls.append(
+            {
+                "sequence": len(model_calls) + 1,
+                "stage": stage,
+                "request_body": body,
+                "response_body": payload,
+                "duration_ms": latency_ms,
+                "status_code": status_code,
+            }
         )
-        answer = EvaluationAnswer.model_validate(_json_object(output_text))
-    except EvaluationModelError as exc:
-        raise EvaluationModelError(
-            str(exc),
-            retryable=exc.retryable,
-            fatal=exc.fatal,
-            request_snapshot=request_snapshot,
-            response_status_code=response.status_code,
-            raw_response=raw_response,
-            latency_ms=latency_ms,
-        ) from exc
-    except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
-        raise EvaluationModelError(
-            "模型返回的答案结构不符合约定",
-            request_snapshot=request_snapshot,
-            response_status_code=response.status_code,
-            raw_response=raw_response,
-            latency_ms=latency_ms,
-        ) from exc
-    input_tokens, output_tokens = _usage(payload, run.api_protocol)
-    return EvaluationModelResult(
-        answer=answer,
-        request_snapshot=request_snapshot,
-        response_status_code=response.status_code,
-        raw_response=payload,
-        latency_ms=latency_ms,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
+
+        if requested_call is not None:
+            try:
+                tool_input = validate_bazi_tool_input(
+                    requested_call,
+                    expected_tool_input,
+                )
+            except ReactProtocolError as exc:
+                raise output_error(str(exc)) from exc
+            tool_started = perf_counter()
+            chart = chart_cache.get(question.case_id) if chart_cache is not None else None
+            if chart is None:
+                chart = run_bazi_chart_tool(tool_input)
+                if chart_cache is not None:
+                    chart_cache[question.case_id] = chart
+            tool_output = build_evaluation_tool_observation(question, chart)
+            tool_duration_ms = round((perf_counter() - tool_started) * 1000)
+            tool_executions.append(
+                {
+                    "sequence": len(tool_executions) + 1,
+                    "name": BAZI_CHART_TOOL_NAME,
+                    "input": tool_input.model_dump(mode="json"),
+                    "output": tool_output,
+                    "duration_ms": tool_duration_ms,
+                }
+            )
+            observation = json.dumps(
+                tool_output,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if run.api_protocol == "responses":
+                continuation = payload.get("output")
+                if not isinstance(continuation, list):
+                    continuation = [requested_call.continuation]
+                responses_input.extend(deepcopy(continuation))
+                responses_input.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": requested_call.call_id,
+                        "output": observation,
+                    }
+                )
+            else:
+                chat_messages.append(deepcopy(requested_call.continuation))
+                chat_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": requested_call.call_id,
+                        "name": BAZI_CHART_TOOL_NAME,
+                        "content": observation,
+                    }
+                )
+            continue
+
+        try:
+            output_text = (
+                _responses_text(payload)
+                if run.api_protocol == "responses"
+                else _chat_text(payload)
+            )
+            answer = EvaluationAnswer.model_validate(_json_object(output_text))
+        except EvaluationModelError as exc:
+            raise output_error(str(exc)) from exc
+        except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+            raise output_error("模型返回的答案结构不符合约定") from exc
+
+        return EvaluationModelResult(
+            answer=answer,
+            request_snapshot=snapshot(body),
+            response_status_code=status_code,
+            raw_response=payload,
+            latency_ms=total_latency_ms,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+        )
+
+    raise output_error(
+        f"ReAct 循环超过 {MAX_REACT_MODEL_CALLS} 次模型响应，已安全终止。"
     )
 
 

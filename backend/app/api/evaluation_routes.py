@@ -30,6 +30,7 @@ from ..evals.mingli_bench.schemas import (
     EvaluationItemList,
     EvaluationItemResponse,
     EvaluationItemTraceResponse,
+    EvaluationModelCallTrace,
     EvaluationOptionResponse,
     EvaluationOverview,
     EvaluationRequestTrace,
@@ -154,76 +155,137 @@ def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
         if item.request_snapshot is not None
         else None
     )
+    model_calls = list(request.model_calls) if request is not None else []
+    if request is not None and not model_calls:
+        model_calls = [
+            EvaluationModelCallTrace(
+                sequence=1,
+                stage="final_answer" if item.response_status_code == 200 else "error",
+                request_body=request.body,
+                response_body=item.raw_response or {},
+                duration_ms=item.latency_ms or 0,
+                status_code=item.response_status_code,
+            )
+        ]
+    tool_executions = list(request.tool_executions) if request is not None else []
     prompt_ready = item.prompt_sha256 is not None
-    request_sent = request is not None
-    response_received = item.response_status_code is not None
-    http_succeeded = bool(
-        item.response_status_code is not None
-        and 200 <= item.response_status_code < 300
-    )
     scored = item.status == "completed"
-    response_detail = (
-        f"模型服务返回 HTTP {item.response_status_code}。"
-        if response_received
-        else item.error_message or "没有收到模型服务的 HTTP 响应。"
-    )
     score_detail = (
         f"模型选择 {item.predicted_answer}，标准答案为 {item.correct_answer}，"
         f"判定为{'正确' if item.is_correct else '错误'}。"
         if scored
         else item.error_message or "模型答案未通过解析和评分。"
     )
+    steps = [
+        EvaluationTraceStep(
+            id="dataset",
+            title="读取评测题目",
+            category="deterministic",
+            status="completed",
+            detail="读取题面和选项；标准答案未进入 Agent 请求。",
+        ),
+        EvaluationTraceStep(
+            id="prompt",
+            title="组装 ReAct 任务",
+            category="prompt",
+            status="completed" if prompt_ready else "failed",
+            detail=(
+                "使用自然文本组合出生资料、题目和选项，并完成答案泄漏检查。"
+                if prompt_ready
+                else item.error_message or "评测提示词构造失败。"
+            ),
+        ),
+    ]
+    tool_index = 0
+    for call in model_calls:
+        if call.stage == "action_selection":
+            tool_execution = (
+                tool_executions[tool_index]
+                if tool_index < len(tool_executions)
+                else None
+            )
+            steps.append(
+                EvaluationTraceStep(
+                    id=f"action_{call.sequence}",
+                    title=f"响应 {call.sequence} · Action",
+                    category="model",
+                    status="completed" if tool_execution is not None else "failed",
+                    detail=(
+                        "模型发起 calculate_bazi_chart 工具调用。"
+                        if tool_execution is not None
+                        else item.error_message or "模型生成的工具调用无效。"
+                    ),
+                    duration_ms=call.duration_ms,
+                )
+            )
+            if tool_execution is not None:
+                steps.extend(
+                    [
+                        EvaluationTraceStep(
+                            id=f"tool_{tool_execution.sequence}",
+                            title=f"执行工具 {tool_execution.sequence}",
+                            category="tool",
+                            status="completed",
+                            detail="后端校验参数后调用确定性排盘引擎。",
+                            duration_ms=tool_execution.duration_ms,
+                        ),
+                        EvaluationTraceStep(
+                            id=f"observation_{tool_execution.sequence}",
+                            title=f"Observation {tool_execution.sequence}",
+                            category="context",
+                            status="completed",
+                            detail="向下一轮响应返回四柱及题目目标年份运势。",
+                        ),
+                    ]
+                )
+                tool_index += 1
+            continue
+        if call.stage == "final_answer":
+            steps.append(
+                EvaluationTraceStep(
+                    id=f"final_{call.sequence}",
+                    title=f"响应 {call.sequence} · Final",
+                    category="model",
+                    status="completed",
+                    detail="模型结束 ReAct 循环并返回选择题答案。",
+                    duration_ms=call.duration_ms,
+                )
+            )
+            continue
+        steps.append(
+            EvaluationTraceStep(
+                id=f"error_{call.sequence}",
+                title=f"响应 {call.sequence} · 错误",
+                category="model",
+                status="failed",
+                detail=item.error_message or "模型请求失败。",
+                duration_ms=call.duration_ms,
+            )
+        )
+    steps.append(
+        EvaluationTraceStep(
+            id="score",
+            title="解析并评分",
+            category="validation",
+            status="completed" if scored else "failed",
+            detail=score_detail,
+        )
+    )
     return EvaluationItemTraceResponse(
         question_id=item.question_id,
         status=item.status,
-        steps=[
-            EvaluationTraceStep(
-                id="dataset",
-                title="读取评测题目",
-                status="completed",
-                detail="从本地 MingLi-Bench 数据文件读取题面和选项，标准答案未进入模型请求。",
-            ),
-            EvaluationTraceStep(
-                id="prompt",
-                title="排盘并构造提示词",
-                status="completed" if prompt_ready else "failed",
-                detail=(
-                    "使用天序排盘结果构造选择题上下文，并完成答案泄漏检查。"
-                    if prompt_ready
-                    else item.error_message or "评测上下文构造失败。"
-                ),
-            ),
-            EvaluationTraceStep(
-                id="request",
-                title="发送模型请求",
-                status="completed" if request_sent else "failed",
-                detail=(
-                    "已按运行时保存的模型配置发出一次无工具请求；Authorization 已脱敏。"
-                    if request_sent
-                    else "尚未生成可用的模型请求快照。"
-                ),
-            ),
-            EvaluationTraceStep(
-                id="response",
-                title="接收模型响应",
-                status="completed" if http_succeeded else "failed",
-                detail=response_detail,
-                duration_ms=item.latency_ms,
-            ),
-            EvaluationTraceStep(
-                id="score",
-                title="解析并评分",
-                status="completed" if scored else "failed",
-                detail=score_detail,
-            ),
-        ],
+        steps=steps,
         request=request,
         response=EvaluationResponseTrace(
             status_code=item.response_status_code,
             body=item.raw_response,
         ),
+        system_prompt=request.system_prompt if request is not None else None,
+        user_prompt=request.user_prompt if request is not None else None,
+        model_calls=model_calls,
+        tool_executions=tool_executions,
         prompt_sha256=item.prompt_sha256,
-        redacted=["API 密钥", "Authorization 请求头"],
+        redacted=["API 密钥", "Authorization 请求头", "模型内部推理文本"],
     )
 
 
@@ -353,6 +415,37 @@ async def get_evaluation_run(
     if run is None:
         raise HTTPException(status_code=404, detail="评测记录不存在")
     return _run_detail(run, await repository.all_items(run.id))
+
+
+@router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_evaluation_run(
+    run_id: UUID,
+    request: Request,
+    admin: AdminUserDependency,
+    repository: EvaluationRepositoryDependency,
+    auth_repository: AuthRepositoryDependency,
+) -> Response:
+    run = await repository.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="评测记录不存在")
+    if run.status in {"queued", "running", "cancel_requested"}:
+        raise HTTPException(status_code=409, detail="运行中的评测不能删除，请先取消并等待结束")
+    audit_details = {
+        "run_id": str(run.id),
+        "scope": run.scope,
+        "benchmark_year": run.benchmark_year,
+        "status": run.status,
+        "total_questions": run.total_questions,
+    }
+    await repository.delete_run(run)
+    await auth_repository.add_audit_log(
+        actor_user_id=admin.id,
+        target_user_id=None,
+        action="admin.evaluation_deleted",
+        details=audit_details,
+        ip_address=request_ip(request),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/runs/{run_id}/items", response_model=EvaluationItemList)

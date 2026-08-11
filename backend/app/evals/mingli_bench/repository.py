@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_session
@@ -57,6 +57,13 @@ class EvaluationRepository:
 
     async def get_run(self, run_id: UUID) -> EvaluationRun | None:
         return await self.session.get(EvaluationRun, run_id)
+
+    async def delete_run(self, run: EvaluationRun) -> None:
+        await self.session.execute(
+            delete(EvaluationItem).where(EvaluationItem.run_id == run.id)
+        )
+        await self.session.delete(run)
+        await self.session.commit()
 
     async def list_runs(self, *, limit: int) -> tuple[list[EvaluationRun], int]:
         total = await self.session.scalar(select(func.count()).select_from(EvaluationRun))

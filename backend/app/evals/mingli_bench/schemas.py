@@ -109,8 +109,26 @@ class EvaluationItemList(BaseModel):
 class EvaluationTraceStep(BaseModel):
     id: str
     title: str
+    category: Literal["deterministic", "context", "prompt", "model", "tool", "validation"]
     status: Literal["completed", "failed"]
     detail: str
+    duration_ms: int | None = None
+
+
+class EvaluationModelCallTrace(BaseModel):
+    sequence: int = Field(ge=1)
+    stage: str
+    request_body: dict[str, Any]
+    response_body: dict[str, Any]
+    duration_ms: int
+    status_code: int | None = None
+
+
+class EvaluationToolExecutionTrace(BaseModel):
+    sequence: int = Field(ge=1)
+    name: str
+    input: dict[str, Any]
+    output: dict[str, Any]
     duration_ms: int | None = None
 
 
@@ -122,6 +140,10 @@ class EvaluationRequestTrace(BaseModel):
     model: str
     headers: dict[str, str]
     body: dict[str, Any]
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+    model_calls: list[EvaluationModelCallTrace] = Field(default_factory=list)
+    tool_executions: list[EvaluationToolExecutionTrace] = Field(default_factory=list)
 
 
 class EvaluationResponseTrace(BaseModel):
@@ -135,6 +157,10 @@ class EvaluationItemTraceResponse(BaseModel):
     steps: list[EvaluationTraceStep]
     request: EvaluationRequestTrace | None
     response: EvaluationResponseTrace
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+    model_calls: list[EvaluationModelCallTrace] = Field(default_factory=list)
+    tool_executions: list[EvaluationToolExecutionTrace] = Field(default_factory=list)
     prompt_sha256: str | None
     redacted: list[str]
 

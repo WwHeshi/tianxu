@@ -15,15 +15,17 @@ import {
   RefreshCcw,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Workflow,
-  X,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AgentDebugModal } from "@/components/agent-debug-modal";
 import {
   ApiError,
   cancelEvaluationRun,
+  deleteEvaluationRun,
   downloadEvaluationExport,
   getCurrentUser,
   getEvaluationItemTrace,
@@ -90,6 +92,12 @@ function evaluationPrompts(trace: EvaluationItemTrace): {
   systemPrompt: string | null;
   userPrompt: string | null;
 } {
+  if (trace.system_prompt || trace.user_prompt) {
+    return {
+      systemPrompt: trace.system_prompt,
+      userPrompt: trace.user_prompt,
+    };
+  }
   const body = trace.request?.body;
   if (!body) return { systemPrompt: null, userPrompt: null };
 
@@ -137,6 +145,7 @@ export function AdminEvaluations() {
   const [notice, setNotice] = useState("");
   const [activeTrace, setActiveTrace] = useState<EvaluationItemTrace | null>(null);
   const [traceLoadingItemId, setTraceLoadingItemId] = useState<number | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
 
   const selectedActive = selectedRun ? ACTIVE_STATUSES.includes(selectedRun.status) : false;
   const requestCount = scope === "quick" ? 5 : scope === "year" ? 40 : 160;
@@ -277,6 +286,41 @@ export function AdminEvaluations() {
       await downloadEvaluationExport(selectedRun.id, format);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "导出评测结果失败。");
+    }
+  }
+
+  async function handleDeleteRun(run: EvaluationRunSummary) {
+    const confirmed = window.confirm(
+      `确认永久删除“${scopeLabel(run)}”吗？逐题结果和调用链路也会一并删除，此操作无法恢复。`,
+    );
+    if (!confirmed) return;
+    setError("");
+    setNotice("");
+    setDeletingRunId(run.id);
+    try {
+      await deleteEvaluationRun(run.id);
+      const [nextOverview, runList] = await Promise.all([
+        getEvaluationOverview(),
+        listEvaluationRuns(),
+      ]);
+      setOverview(nextOverview);
+      setRuns(runList.items);
+      if (selectedRun?.id === run.id) {
+        setActiveTrace(null);
+        const targetId = nextOverview.active_run?.id ?? runList.items[0]?.id;
+        if (targetId) {
+          setResultFilter("all");
+          await loadRun(targetId, "all", true);
+        } else {
+          setSelectedRun(null);
+          setItems([]);
+        }
+      }
+      setNotice("历史评测已删除。");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "删除历史评测失败。");
+    } finally {
+      setDeletingRunId(null);
     }
   }
 
@@ -421,9 +465,21 @@ export function AdminEvaluations() {
           <div className="admin-table-header"><strong><History size={14} />历史评测</strong><button type="button" onClick={() => void loadPage()}><RefreshCcw size={14} />刷新</button></div>
           <div className="evaluation-history-list">
             {runs.map((run) => (
-              <button type="button" key={run.id} data-selected={selectedRun?.id === run.id || undefined} onClick={() => void loadRun(run.id, resultFilter)}>
-                <span className={`evaluation-status is-${run.status}`}>{STATUS_LABELS[run.status]}</span><strong>{scopeLabel(run)}</strong><small>{percent(run.accuracy)} · {run.completed_questions}/{run.total_questions} · {formatDate(run.created_at)}</small>
-              </button>
+              <div className="evaluation-history-item" key={run.id} data-selected={selectedRun?.id === run.id || undefined}>
+                <button className="evaluation-history-select" type="button" onClick={() => void loadRun(run.id, resultFilter)}>
+                  <span className={`evaluation-status is-${run.status}`}>{STATUS_LABELS[run.status]}</span><strong>{scopeLabel(run)}</strong><small>{percent(run.accuracy)} · {run.completed_questions}/{run.total_questions} · {formatDate(run.created_at)}</small>
+                </button>
+                <button
+                  className="evaluation-history-delete"
+                  type="button"
+                  title={ACTIVE_STATUSES.includes(run.status) ? "运行中的评测不能删除" : "删除历史评测"}
+                  aria-label={`删除${scopeLabel(run)}`}
+                  disabled={ACTIVE_STATUSES.includes(run.status) || deletingRunId === run.id}
+                  onClick={() => void handleDeleteRun(run)}
+                >
+                  {deletingRunId === run.id ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
+                </button>
+              </div>
             ))}
             {runs.length === 0 && <p className="evaluation-empty">还没有评测记录。</p>}
           </div>
@@ -496,96 +552,20 @@ function EvaluationTraceModal({
       : "—";
   const { systemPrompt, userPrompt } = evaluationPrompts(trace);
 
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
   return (
-    <div
-      className="modal-backdrop agent-debug-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        className="agent-debug-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="evaluation-trace-title"
-      >
-        <div className="agent-debug-panel">
-          <div className="agent-debug-heading">
-            <div>
-              <p className="eyebrow">EVALUATION TRACE</p>
-              <h4 id="evaluation-trace-title">{trace.question_id} 调用链路</h4>
-            </div>
-            <div className="agent-debug-heading-actions">
-              <button className="icon-button" type="button" onClick={onClose} aria-label="关闭调用链路">
-                <X size={17} aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-
-          <dl className="agent-trace-meta evaluation-trace-meta">
-            <div><dt>协议</dt><dd>{protocolLabel}</dd></div>
-            <div><dt>模型</dt><dd title={trace.request?.model}>{trace.request?.model ?? "—"}</dd></div>
-            <div><dt>HTTP 状态</dt><dd>{trace.response.status_code ?? "未收到响应"}</dd></div>
-            <div><dt>地址</dt><dd title={trace.request?.endpoint}>{trace.request?.endpoint ?? "—"}</dd></div>
-          </dl>
-
-          <ol className="agent-trace-timeline">
-            {trace.steps.map((step, index) => (
-              <li key={step.id} data-status={step.status}>
-                <span className="agent-trace-marker">
-                  {step.status === "failed"
-                    ? <AlertCircle size={15} aria-hidden="true" />
-                    : <CheckCircle2 size={15} aria-hidden="true" />}
-                </span>
-                <div>
-                  <div className="agent-trace-title">
-                    <span>{String(index + 1).padStart(2, "0")}</span>
-                    <strong>{step.title}</strong>
-                    {step.duration_ms !== null && <small>{step.duration_ms} ms</small>}
-                  </div>
-                  <p>{step.detail}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-
-          <div className="agent-debug-details">
-            <details open>
-              <summary>系统提示词</summary>
-              <pre>{systemPrompt ?? "该记录没有可用的系统提示词。"}</pre>
-            </details>
-            <details open>
-              <summary>用户提示词</summary>
-              <pre>{userPrompt ?? "该记录没有可用的用户提示词。"}</pre>
-            </details>
-            <details>
-              <summary>模型请求体</summary>
-              <pre>{trace.request
-                ? JSON.stringify(trace.request.body, null, 2)
-                : "该记录没有可用的请求快照。"}</pre>
-            </details>
-            <details open>
-              <summary>模型原始响应</summary>
-              <pre>{trace.response.body
-                ? JSON.stringify(trace.response.body, null, 2)
-                : "没有收到可保存的 HTTP 响应正文。"}</pre>
-            </details>
-          </div>
-
-          <p className="agent-debug-redacted">
-            Prompt SHA-256：{trace.prompt_sha256 ?? "—"} · 已隐藏：{trace.redacted.join("、")}
-          </p>
-        </div>
-      </section>
-    </div>
+    <AgentDebugModal
+      protocolLabel={protocolLabel}
+      model={trace.request?.model ?? "—"}
+      modelCallCount={trace.model_calls.length}
+      toolExecutionCount={trace.tool_executions.length}
+      endpoint={trace.request?.endpoint ?? "—"}
+      steps={trace.steps}
+      systemPrompt={systemPrompt}
+      userPrompt={userPrompt}
+      modelCalls={trace.model_calls}
+      redacted={trace.redacted}
+      footerPrefix={`题目：${trace.question_id} · Prompt SHA-256：${trace.prompt_sha256 ?? "—"}`}
+      onClose={onClose}
+    />
   );
 }
