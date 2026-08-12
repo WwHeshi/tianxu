@@ -30,15 +30,13 @@ from .schemas import (
     AnnualFortune,
     BaziReport,
     BigLuckPeriod,
-    BranchComponent,
     ChartPreviewResponse,
     Component,
     FortunePillar,
     MonthlyFortune,
-    Pillar,
 )
 
-PROMPT_VERSION = "bazi-report-v13-react-text"
+PROMPT_VERSION = "bazi-report-v15-react-text"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0
@@ -63,7 +61,7 @@ REPORT_INSTRUCTIONS = """你是采用 ReAct 工作方式的八字命盘报告 Ag
 4. 不作疾病诊断、寿命判断、灾祸断言，不给出确定性的法律、投资或医疗建议。
 5. 每一节应具体对应输入命盘，避免空泛套话；若数据不足，应直接说明局限。
 6. 当前运势只讨论输入给出的当前大运、流年、流月，不推测未提供的完整时间线。
-7. auxiliary_shen_sha 仅作辅助参考，不得依据单一神煞作吉凶断言。
+7. shen_sha 仅作辅助参考，不得依据单一神煞作吉凶断言。
 8. 明确区分输入中的确定性事实与基于事实的传统解释，不得声称引擎已经计算输入未提供的结论。
 9. 不得在最终回答中展示内部思考、ReAct 推理过程、工具调用过程或 Observation 原文。
 10. 严格返回指定 JSON 结构，不添加其他字段。"""
@@ -245,7 +243,6 @@ def _select_month(annual: AnnualFortune, now: datetime) -> MonthlyFortune | None
 
 
 YIN_YANG_LABEL = {"yang": "阳", "yin": "阴"}
-GENDER_LABEL = {"male": "男", "female": "女", "other": "其他"}
 BIG_LUCK_DIRECTION_LABEL = {"forward": "顺排", "backward": "逆排"}
 
 
@@ -255,37 +252,6 @@ def _component_context(component: Component) -> dict[str, Any]:
         "element": component.element,
         "yin_yang": YIN_YANG_LABEL[component.polarity],
         "ten_god": component.ten_god,
-    }
-
-
-def _branch_context(branch: BranchComponent) -> dict[str, Any]:
-    hidden_stems: list[dict[str, Any]] = []
-    for position, stem in enumerate(branch.hidden_stems, start=1):
-        hidden_stems.append(
-            {
-                **_component_context(stem),
-                "position": position,
-                "is_main_qi": position == 1,
-            }
-        )
-    return {
-        "symbol": branch.symbol,
-        "primary_element": branch.element,
-        "yin_yang": YIN_YANG_LABEL[branch.polarity],
-        "hidden_stems": hidden_stems,
-    }
-
-
-def _pillar_context(pillar: Pillar) -> dict[str, Any]:
-    return {
-        "gan_zhi": pillar.gan_zhi,
-        "heavenly_stem": _component_context(pillar.heavenly_stem),
-        "earthly_branch": _branch_context(pillar.earthly_branch),
-        "day_master_growth_stage": pillar.growth_stage,
-        "pillar_stem_growth_stage": pillar.self_growth_stage,
-        "pillar_xun_void_branches": list(pillar.xun_kong),
-        "na_yin": pillar.na_yin,
-        "auxiliary_shen_sha": pillar.shen_sha,
     }
 
 
@@ -357,38 +323,6 @@ def _current_fortune_context(
     }
 
 
-def build_report_context(
-    chart: ChartPreviewResponse,
-    *,
-    now: datetime | None = None,
-    birth_source: ChartPreviewResponse | None = None,
-) -> dict[str, Any]:
-    """Build a compact context and intentionally omit the full fortune timeline."""
-
-    current_time = now or datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
-    source = birth_source or chart
-    return {
-        "birth": {
-            "input_beijing_datetime": source.normalized_input.beijing_datetime.isoformat(),
-            "effective_chart_datetime": source.chart.calendar.solar_datetime.isoformat(),
-            "chart_time_basis": (
-                "真太阳时" if source.solar_time_adjustment is not None else "北京时间"
-            ),
-            "gender": GENDER_LABEL[source.normalized_input.gender.value],
-        },
-        "pillars": {
-            "year": _pillar_context(chart.chart.pillars.year),
-            "month": _pillar_context(chart.chart.pillars.month),
-            "day": _pillar_context(chart.chart.pillars.day),
-            "hour": _pillar_context(chart.chart.pillars.hour),
-        },
-        "current_fortune": _current_fortune_context(
-            chart=chart,
-            current_time=current_time,
-        ),
-    }
-
-
 def _extract_responses_output_text(payload: dict[str, Any]) -> str:
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct.strip():
@@ -420,11 +354,42 @@ def _extract_chat_output_text(payload: dict[str, Any]) -> str:
     raise ModelProviderError("模型没有返回可用的报告内容。")
 
 
-def _report_user_prompt(tool_input: BaziChartToolInput) -> str:
+def _current_fortune_prompt(context: dict[str, Any] | None) -> str:
+    if context is None:
+        return "当前大运：未提供\n当前流年：未提供\n当前流月：未提供"
+
+    def fortune_line(label: str, item: dict[str, Any] | None) -> str:
+        if item is None or item.get("pillar") is None:
+            return f"{label}：未提供"
+        pillar = item["pillar"]["gan_zhi"]
+        effective_from = item["effective_from"]
+        effective_until = item["effective_until_exclusive"]
+        return f"{label}：{pillar}（{effective_from} 至 {effective_until}，结束时间不含）"
+
+    annual = context.get("current_annual")
+    month = context.get("current_month")
+    lines = [
+        f"当前运势基准时间：{context['as_of_beijing_datetime']}",
+        fortune_line("当前大运", context.get("current_big_luck")),
+        fortune_line("当前流年", annual),
+        fortune_line("当前流月", month),
+    ]
+    if annual is not None:
+        lines[2] += f"，公历年份 {annual['year']}，虚岁 {annual['nominal_age_sui']}"
+    if month is not None:
+        lines[3] += f"，月界节气 {month['boundary_solar_term']}"
+    return "\n".join(lines)
+
+
+def _report_user_prompt(
+    tool_input: BaziChartToolInput,
+    current_fortune: dict[str, Any] | None,
+) -> str:
     return (
         "请根据以下标准化出生资料，生成一份固定八章节的八字分析报告：\n"
         f"性别：{tool_input.gender.value}\n"
-        f"真太阳出生时间：{tool_input.true_solar_datetime.isoformat(timespec='seconds')}"
+        f"真太阳出生时间：{tool_input.true_solar_datetime.isoformat(timespec='seconds')}\n"
+        f"{_current_fortune_prompt(current_fortune)}"
     )
 
 
@@ -492,7 +457,12 @@ async def generate_structured_report(
         gender=chart.normalized_input.gender,
         true_solar_datetime=chart.normalized_input.true_solar_datetime,
     )
-    user_prompt = _report_user_prompt(expected_tool_input)
+    report_now = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
+    current_fortune = _current_fortune_context(
+        chart=chart,
+        current_time=report_now,
+    )
+    user_prompt = _report_user_prompt(expected_tool_input, current_fortune)
     if credential.api_protocol == "responses":
         url = f"{credential.base_url.rstrip('/')}/responses"
         system_prompt = REPORT_INSTRUCTIONS
@@ -514,7 +484,6 @@ async def generate_structured_report(
     timeout = httpx.Timeout(MODEL_TIMEOUT_SECONDS, connect=15.0)
     model_calls: list[ReportModelCall] = []
     tool_executions: list[ReportToolExecution] = []
-    report_now = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
     last_request_body: dict[str, Any] = {}
     last_payload: dict[str, Any] = {}
 
@@ -605,13 +574,9 @@ async def generate_structured_report(
                     raise output_error(str(exc)) from exc
 
                 tool_started = perf_counter()
-                tool_chart = run_bazi_chart_tool(tool_input)
+                tool_result = run_bazi_chart_tool(tool_input)
                 tool_duration_ms = round((perf_counter() - tool_started) * 1000)
-                tool_output = build_report_context(
-                    tool_chart,
-                    now=report_now,
-                    birth_source=chart,
-                )
+                tool_output = tool_result.model_dump(mode="json")
                 tool_executions.append(
                     ReportToolExecution(
                         name=BAZI_CHART_TOOL_NAME,

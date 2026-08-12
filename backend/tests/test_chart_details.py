@@ -248,14 +248,6 @@ def test_fortune_direction_uses_gender_and_year_stem_polarity() -> None:
     assert female.big_luck_periods[1].pillar.gan_zhi == "丁巳"
 
 
-def test_other_gender_does_not_guess_a_big_luck_direction() -> None:
-    result = calculate_chart(
-        BirthInput(beijing_datetime="2003-04-13T18:57:00", gender="other")
-    )
-
-    assert result.chart.fortune_cycles is None
-
-
 def test_every_pillar_detail_is_derived_from_the_final_gan_zhi() -> None:
     result = calculate_chart(
         BirthInput(

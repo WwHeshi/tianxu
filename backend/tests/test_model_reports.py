@@ -1,6 +1,5 @@
 import json
 from collections.abc import AsyncIterator
-from datetime import datetime
 from uuid import uuid4
 
 import httpx
@@ -21,7 +20,6 @@ from app.reports import (
     ReportGenerationResult,
     ReportModelCall,
     ReportToolExecution,
-    build_report_context,
     generate_structured_report,
 )
 from app.reports import (
@@ -262,7 +260,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v13-react-text"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v15-react-text"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
         "normalize",
@@ -338,54 +336,6 @@ async def test_report_format_error_returns_failed_debug_trace(
     assert user_response.status_code == 502
     assert user_response.json()["detail"] == "模型返回的报告结构不符合约定，请重试。"
     assert "debug_trace" not in user_response.text
-
-
-def test_report_context_omits_full_fortune_timeline() -> None:
-    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
-
-    context = build_report_context(chart, now=datetime(2026, 8, 8, 12, 0))
-
-    serialized = str(context)
-    assert "big_luck_periods" not in serialized
-    assert set(context) == {
-        "birth",
-        "pillars",
-        "current_fortune",
-    }
-    assert context["birth"] == {
-        "input_beijing_datetime": "1990-01-01T12:00:00",
-        "effective_chart_datetime": "1990-01-01T11:30:33",
-        "chart_time_basis": "真太阳时",
-        "gender": "男",
-    }
-    year = context["pillars"]["year"]
-    assert "name" not in year
-    assert "growth_stage" not in year
-    assert year["day_master_growth_stage"] == "临官"
-    assert year["pillar_stem_growth_stage"] == "帝旺"
-    assert year["heavenly_stem"]["yin_yang"] == "阴"
-    assert "polarity" not in year["heavenly_stem"]
-    assert year["earthly_branch"]["primary_element"] == "火"
-    assert year["earthly_branch"]["hidden_stems"][0]["is_main_qi"] is True
-    assert year["earthly_branch"]["hidden_stems"][0]["position"] == 1
-    current = context["current_fortune"]
-    assert isinstance(current, dict)
-    assert current["big_luck_sequence_direction"] == "逆排"
-    assert set(current["current_big_luck"]) == {
-        "phase",
-        "effective_from",
-        "effective_until_exclusive",
-        "pillar",
-    }
-    assert set(current["current_annual"]) == {
-        "year",
-        "nominal_age_sui",
-        "effective_from",
-        "effective_until_exclusive",
-        "pillar",
-    }
-    assert "index" not in serialized
-    assert "transition" not in serialized
 
 
 def test_agent_debug_trace_uses_actual_react_response_count() -> None:
@@ -506,12 +456,12 @@ async def test_responses_report_uses_react_tool_loop() -> None:
     assert execution.report.chart_overview == "命盘概览内容"
     assert "output" in execution.raw_response
     assert "normalized_input" not in execution.context
-    assert "calendar" not in execution.context
-    assert "element_distribution" not in execution.context
+    assert "calendar" in execution.context
+    assert "element_distribution" in execution.context
     assert "calculation_policy" not in execution.context
     assert "engine" not in execution.context
     assert "limitations" not in execution.context
-    assert "day_master" not in execution.context
+    assert "day_master" in execution.context
     assert "chart_reliability_warnings" not in execution.context
     assert len(requests) == 2
     first_body = json.loads(requests[0].content)
@@ -522,6 +472,9 @@ async def test_responses_report_uses_react_tool_loop() -> None:
     user_content = first_body["input"][0]["content"]
     assert "性别：male" in user_content
     assert "真太阳出生时间：1990-01-01T11:30:33" in user_content
+    assert "当前大运：" in user_content
+    assert "当前流年：" in user_content
+    assert "当前流月：" in user_content
     assert "{" not in user_content
     assert "}" not in user_content
     assert "calculate_bazi_chart" not in user_content
@@ -531,6 +484,7 @@ async def test_responses_report_uses_react_tool_loop() -> None:
     assert second_body["text"]["format"]["type"] == "json_schema"
     assert second_body["input"][-1]["type"] == "function_call_output"
     assert "big_luck_periods" not in second_body["input"][-1]["output"]
+    assert "current_fortune" not in second_body["input"][-1]["output"]
     assert len(execution.model_calls) == 2
     assert execution.tool_executions[0].input == {
         "gender": "male",
@@ -581,15 +535,16 @@ async def test_react_agent_accepts_direct_final_without_tool_call() -> None:
     assert len(requests) == 1
     assert [call.stage for call in execution.model_calls] == ["final_answer"]
     assert execution.tool_executions == ()
-    assert execution.context == {
-        "birth": {
-            "gender": "male",
-            "true_solar_datetime": "1990-01-01T11:30:33",
-        }
-    }
+    assert execution.context == {"birth": {
+        "gender": "male",
+        "true_solar_datetime": "1990-01-01T11:30:33",
+    }}
     request_body = json.loads(requests[0].content)
     assert request_body["tool_choice"] == "auto"
     assert "标准化出生资料" in request_body["input"][0]["content"]
+    assert "当前大运：" in request_body["input"][0]["content"]
+    assert "当前流年：" in request_body["input"][0]["content"]
+    assert "当前流月：" in request_body["input"][0]["content"]
     assert "calculate_bazi_chart" not in request_body["input"][0]["content"]
     assert "{" not in request_body["input"][0]["content"]
 
@@ -910,7 +865,7 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     assert "必须且只能包含以下 8 个字段" in first_body["messages"][0]["content"]
     assert "chart_overview：命盘整体概述" in first_body["messages"][0]["content"]
     assert "不要输出 Markdown 代码块" in first_body["messages"][0]["content"]
-    assert "auxiliary_shen_sha 仅作辅助参考" in first_body["messages"][0]["content"]
+    assert "shen_sha 仅作辅助参考" in first_body["messages"][0]["content"]
     assert second_body["tool_choice"] == "auto"
     assert second_body["messages"][-1]["role"] == "tool"
     assert "big_luck_periods" not in second_body["messages"][-1]["content"]

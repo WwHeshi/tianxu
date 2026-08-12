@@ -1313,8 +1313,8 @@ function ChartResult({
     ? formatChinaBirthplace(normalized.birthplace)
     : "未选择（按北京时间）";
   const usesTrueSolarTime = chart.calculation_policy?.true_solar_time !== false;
-  const genderLabel = normalized.gender === "female" ? "女" : normalized.gender === "male" ? "男" : "其他";
-  const dayMasterLabel = normalized.gender === "female" ? "元女" : normalized.gender === "male" ? "元男" : "日主";
+  const genderLabel = normalized.gender === "female" ? "女" : "男";
+  const dayMasterLabel = normalized.gender === "female" ? "元女" : "元男";
   const pillars = PILLARS.map((definition, index) => ({
     ...definition,
     pillar: getPillar(chart, definition.key, index),

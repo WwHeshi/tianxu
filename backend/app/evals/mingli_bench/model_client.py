@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from ...bazi.tool import BAZI_CHART_TOOL_NAME, run_bazi_chart_tool
+from ...bazi.tool import BAZI_CHART_TOOL_NAME, BaziChartToolResult, run_bazi_chart_tool
 from ...models import EvaluationRun
 from ...react_agent import (
     MAX_REACT_MODEL_CALLS,
@@ -22,10 +22,8 @@ from ...react_agent import (
     responses_tool_call,
     validate_bazi_tool_input,
 )
-from ...schemas import ChartPreviewResponse
 from .context import (
     SYSTEM_PROMPT,
-    build_evaluation_tool_observation,
     chart_tool_input_for_question,
 )
 from .dataset import EvaluationQuestion
@@ -154,7 +152,7 @@ async def request_evaluation_answer(
     user_prompt: str,
     question: EvaluationQuestion,
     client: httpx.AsyncClient,
-    chart_cache: dict[str, ChartPreviewResponse] | None = None,
+    chart_cache: dict[str, BaziChartToolResult] | None = None,
 ) -> EvaluationModelResult:
     expected_tool_input = chart_tool_input_for_question(question)
     if run.api_protocol == "responses":
@@ -362,7 +360,7 @@ async def request_evaluation_answer(
                 chart = run_bazi_chart_tool(tool_input)
                 if chart_cache is not None:
                     chart_cache[question.case_id] = chart
-            tool_output = build_evaluation_tool_observation(question, chart)
+            tool_output = chart.model_dump(mode="json")
             tool_duration_ms = round((perf_counter() - tool_started) * 1000)
             tool_executions.append(
                 {

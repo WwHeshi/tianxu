@@ -10,10 +10,10 @@ import httpx
 from sqlalchemy import func, select
 
 from ...auth import utc_now
+from ...bazi.tool import BaziChartToolResult
 from ...credentials import LOCAL_CREDENTIAL_SCOPE, ModelCredentialRepository
 from ...database import SessionFactory
 from ...models import EvaluationItem, EvaluationRun
-from ...schemas import ChartPreviewResponse
 from ...security import SecretCipher
 from .context import build_evaluation_prompt
 from .dataset import EvaluationQuestion, load_dataset
@@ -131,7 +131,7 @@ async def _score_one(
     run: EvaluationRun,
     api_key: str,
     client: httpx.AsyncClient,
-    chart_cache: dict[str, ChartPreviewResponse],
+    chart_cache: dict[str, BaziChartToolResult],
 ) -> ItemOutcome:
     try:
         user_prompt, _, prompt_sha256 = build_evaluation_prompt(question)
@@ -302,7 +302,7 @@ async def execute_evaluation_run(run_id: UUID) -> None:
         await _set_run_state(run_id, "completed")
         return
 
-    chart_cache: dict[str, ChartPreviewResponse] = {}
+    chart_cache: dict[str, BaziChartToolResult] = {}
     try:
         async with httpx.AsyncClient(timeout=model_timeout()) as client:
             for start in range(0, len(pending), run.max_concurrency):

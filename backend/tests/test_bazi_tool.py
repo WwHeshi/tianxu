@@ -19,9 +19,19 @@ def test_chart_tool_has_only_normalized_time_and_gender_inputs() -> None:
     assert set(schema["properties"]) == {"gender", "true_solar_datetime"}
     assert set(schema["required"]) == {"gender", "true_solar_datetime"}
     assert schema["additionalProperties"] is False
+    assert schema["properties"]["gender"]["enum"] == ["male", "female"]
+    assert schema["properties"]["true_solar_datetime"]["description"] == (
+        "已完成校正的真太阳时，格式为 YYYY-MM-DDTHH:mm:ss，工具不再换算。"
+    )
 
 
 def test_chart_tool_rejects_timezone_and_unknown_inputs() -> None:
+    with pytest.raises(ValidationError, match="gender"):
+        BaziChartToolInput(
+            gender="other",
+            true_solar_datetime="1974-04-28T15:45:32",
+        )
+
     with pytest.raises(ValidationError, match="真太阳时间不得附带时区"):
         BaziChartToolInput(
             gender="male",
@@ -38,7 +48,7 @@ def test_chart_tool_rejects_timezone_and_unknown_inputs() -> None:
         )
 
 
-def test_chart_tool_preserves_existing_engine_result() -> None:
+def test_chart_tool_returns_natal_chart_without_fortune_cycles() -> None:
     payload = BaziChartToolInput(
         gender="male",
         true_solar_datetime="1974-04-28T16:40:00",
@@ -49,14 +59,23 @@ def test_chart_tool_preserves_existing_engine_result() -> None:
         BirthInput(beijing_datetime="1974-04-28T16:40:00", gender="male")
     )
 
-    assert tool_result.chart == legacy_result.chart
-    assert tool_result.engine == legacy_result.engine
+    assert tool_result.calendar == legacy_result.chart.calendar
+    assert tool_result.pillars == legacy_result.chart.pillars
+    assert tool_result.day_master == legacy_result.chart.day_master
+    assert tool_result.element_distribution == legacy_result.chart.element_distribution
+    assert set(tool_result.model_dump()) == {
+        "calendar",
+        "pillars",
+        "day_master",
+        "element_distribution",
+    }
+    assert legacy_result.chart.fortune_cycles is not None
     assert tuple(
         pillar.gan_zhi
         for pillar in (
-            tool_result.chart.pillars.year,
-            tool_result.chart.pillars.month,
-            tool_result.chart.pillars.day,
-            tool_result.chart.pillars.hour,
+            tool_result.pillars.year,
+            tool_result.pillars.month,
+            tool_result.pillars.day,
+            tool_result.pillars.hour,
         )
     ) == ("甲寅", "戊辰", "己亥", "壬申")

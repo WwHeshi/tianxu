@@ -16,7 +16,6 @@ from app.evals.mingli_bench import worker
 from app.evals.mingli_bench.context import (
     SYSTEM_PROMPT,
     build_evaluation_prompt,
-    build_evaluation_tool_observation,
     chart_for_question,
     chart_tool_input_for_question,
     target_years,
@@ -146,20 +145,17 @@ def test_evaluation_prompt_is_natural_text_without_chart_or_label() -> None:
     assert len(prompt_hash) == 64
 
 
-def test_evaluation_tool_observation_contains_target_fortune() -> None:
+def test_evaluation_tool_observation_contains_only_natal_chart() -> None:
     dataset = load_dataset()
     question = dataset.get_question("ftb_0001")
-    observation = build_evaluation_tool_observation(
-        question,
-        chart_for_question(question),
-    )
+    observation = chart_for_question(question).model_dump(mode="json")
 
-    assert observation["fortune"]["target_years"]["1996"]
+    assert "fortune" not in observation
     assert "calculation_policy" not in observation
     year_pillar = observation["pillars"]["year"]
-    assert "self_growth_stage" not in year_pillar
-    assert "element" not in year_pillar["heavenly_stem"]
-    assert "polarity" not in year_pillar["heavenly_stem"]
+    assert "self_growth_stage" in year_pillar
+    assert "element" in year_pillar["heavenly_stem"]
+    assert "polarity" in year_pillar["heavenly_stem"]
 
 
 def test_tianxu_evaluation_chart_uses_sect_one_and_lichun_year() -> None:
@@ -171,7 +167,7 @@ def test_tianxu_evaluation_chart_uses_sect_one_and_lichun_year() -> None:
     }
     for case_id, values in expected.items():
         question = next(item for item in dataset.questions if item.case_id == case_id)
-        chart = chart_for_question(question).chart.pillars
+        chart = chart_for_question(question).pillars
         assert (
             chart.year.gan_zhi,
             chart.month.gan_zhi,
@@ -579,7 +575,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v5-react-text",
+            prompt_version="mingli-eval-v6-react-text",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,

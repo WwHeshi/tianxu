@@ -219,9 +219,8 @@ def test_each_v2_extension_has_a_positive_and_negative_fixture(
     assert all(name not in pillar_matches for pillar_matches in negative.values())
 
 
-def test_other_gender_does_not_guess_a_yuan_chen_direction() -> None:
+def test_shen_sha_rejects_unsupported_gender() -> None:
     pillars = {"year": "甲子", "month": "辛未", "day": "丙寅", "hour": "庚子"}
 
-    result = calculate_shen_sha(pillars, gender="other")
-
-    assert all("元辰" not in pillar_matches for pillar_matches in result.values())
+    with pytest.raises(ValueError, match="unsupported gender"):
+        calculate_shen_sha(pillars, gender="other")

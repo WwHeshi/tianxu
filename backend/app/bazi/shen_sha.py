@@ -14,7 +14,7 @@ from lunar_python.util import LunarUtil
 
 SHEN_SHA_POLICY_VERSION = "v2"
 PILLAR_NAMES = ("year", "month", "day", "hour")
-GENDER_VALUES = ("male", "female", "other")
+GENDER_VALUES = ("male", "female")
 
 # This order is part of the API presentation contract.
 SHEN_SHA_DISPLAY_ORDER = (
@@ -475,14 +475,13 @@ def calculate_shen_sha(
     if day_gan_zhi in NINE_UGLY_DAYS:
         matches["day"].add("九丑")
 
-    if gender != "other":
-        uses_yang_male_yin_female = (gender == "male") == (year_stem in YANG_STEMS)
-        yuan_chen_table = (
-            YUAN_CHEN_YANG_MALE_YIN_FEMALE
-            if uses_yang_male_yin_female
-            else YUAN_CHEN_YIN_MALE_YANG_FEMALE
-        )
-        _add_by_branch(matches, pillars, "元辰", yuan_chen_table[year_branch])
+    uses_yang_male_yin_female = (gender == "male") == (year_stem in YANG_STEMS)
+    yuan_chen_table = (
+        YUAN_CHEN_YANG_MALE_YIN_FEMALE
+        if uses_yang_male_yin_female
+        else YUAN_CHEN_YIN_MALE_YANG_FEMALE
+    )
+    _add_by_branch(matches, pillars, "元辰", yuan_chen_table[year_branch])
 
     child_god_season = _group_for(month_branch, tuple(CHILD_GOD_SEASON_BRANCHES))
     child_god_targets = (

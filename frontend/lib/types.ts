@@ -351,7 +351,7 @@ export interface ChartCalendarDetail {
   lunar_text: string;
   time_branch: string;
   zodiac: string;
-  destiny_type: "乾造" | "坤造" | "命造";
+  destiny_type: "乾造" | "坤造";
 }
 
 export interface CalculationPolicy {
@@ -370,7 +370,7 @@ export interface NormalizedBirthInfo {
   calendar_type: "solar" | "lunar";
   lunar_date: LunarDateInput | null;
   birthplace: NormalizedBirthplace | null;
-  gender: Gender | "other";
+  gender: Gender;
 }
 
 export interface SolarTimeAdjustment {

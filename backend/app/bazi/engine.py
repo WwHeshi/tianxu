@@ -126,7 +126,7 @@ LIMITATIONS = [
     ),
     "接近换日、时辰或节气边界时，应复核出生时间；真太阳时模式还应结合具体地址复核。",
     "均时差使用 NOAA 近似公式，节气表由排盘库提供，边界样例仍需独立历书交叉校验。",
-    "性别用于乾造、坤造标签、元辰规则和大运顺逆；`other` 不生成运势周期。",
+    "性别用于乾造、坤造标签、元辰规则和大运顺逆。",
     (
         "起运按相邻节的精确分钟数折算，4320 分钟折 1 年；"
         "大运按精确交运时刻切换，流年立春换年，流月按十二个节换月。"
@@ -530,10 +530,7 @@ def _calculate_fortune_cycles(
     *,
     day_master: str,
     gender: str,
-) -> FortuneCycles | None:
-    if gender == "other":
-        return None
-
+) -> FortuneCycles:
     yun = eight_char.getYun(1 if gender == "male" else 0, FORTUNE_SECT)
     birth_solar = yun.getLunar().getSolar()
     birth_solar_datetime = _solar_datetime(birth_solar)
@@ -617,8 +614,16 @@ def _calculate_fortune_cycles(
     )
 
 
-def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
-    """Calculate a chart with a deterministic, versioned policy."""
+def calculate_chart(
+    birth: BirthInput,
+    *,
+    include_fortune_cycles: bool = True,
+) -> ChartPreviewResponse:
+    """Calculate a chart with a deterministic, versioned policy.
+
+    Agent tools can disable the fortune timeline while the chart preview API
+    keeps the complete result by default.
+    """
 
     _validate_calendar_input(birth)
     normalized, solar_time_adjustment, warnings = _normalize_birth(birth)
@@ -649,10 +654,14 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
 
     day_master = raw_pillars["day"][0]
     shen_sha = calculate_shen_sha(raw_pillars, gender=birth.gender.value)
-    fortune_cycles = _calculate_fortune_cycles(
-        eight_char,
-        day_master=day_master,
-        gender=birth.gender.value,
+    fortune_cycles = (
+        _calculate_fortune_cycles(
+            eight_char,
+            day_master=day_master,
+            gender=birth.gender.value,
+        )
+        if include_fortune_cycles
+        else None
     )
     pillar_map = {
         name: _pillar(name, value, day_master, shen_sha[name])
@@ -664,7 +673,6 @@ def calculate_chart(birth: BirthInput) -> ChartPreviewResponse:
     destiny_type = {
         "male": "乾造",
         "female": "坤造",
-        "other": "命造",
     }[birth.gender.value]
     calendar = ChartCalendar(
         solar_datetime=true_solar,

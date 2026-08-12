@@ -7,7 +7,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from ..schemas import BirthInput, ChartPreviewResponse, Gender
+from ..schemas import (
+    BirthInput,
+    ChartCalendar,
+    Component,
+    ElementDistribution,
+    Gender,
+    Pillars,
+)
 from .engine import calculate_chart
 
 BAZI_CHART_TOOL_NAME = "calculate_bazi_chart"
@@ -33,6 +40,17 @@ class BaziChartToolInput(BaseModel):
         return value
 
 
+class BaziChartToolResult(BaseModel):
+    """Final Agent observation containing only natal-chart facts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    calendar: ChartCalendar
+    pillars: Pillars
+    day_master: Component
+    element_distribution: ElementDistribution
+
+
 def bazi_chart_tool_definition() -> dict[str, Any]:
     """Return a provider-neutral function-tool definition."""
 
@@ -44,12 +62,15 @@ def bazi_chart_tool_definition() -> dict[str, Any]:
             "properties": {
                 "gender": {
                     "type": "string",
-                    "enum": ["male", "female", "other"],
+                    "enum": ["male", "female"],
                 },
                 "true_solar_datetime": {
                     "type": "string",
                     "format": "date-time",
-                    "description": "不带时区或 UTC 偏移的真太阳当地时间。",
+                    "description": (
+                        "已完成校正的真太阳时，格式为 YYYY-MM-DDTHH:mm:ss，"
+                        "工具不再换算。"
+                    ),
                 },
             },
             "required": ["gender", "true_solar_datetime"],
@@ -58,18 +79,25 @@ def bazi_chart_tool_definition() -> dict[str, Any]:
     }
 
 
-def run_bazi_chart_tool(payload: BaziChartToolInput) -> ChartPreviewResponse:
-    """Run the existing engine without performing another time correction.
+def run_bazi_chart_tool(payload: BaziChartToolInput) -> BaziChartToolResult:
+    """Calculate the natal chart without time correction or fortune cycles.
 
     ``calculate_chart`` already treats a birthplace-free clock value as the
     exact wall-clock components used by lunar-python. Passing the normalized
-    true-solar value through that path preserves the existing pillar, luck
-    cycle, sect and boundary behavior while giving callers a smaller contract.
+    true-solar value through that path preserves the existing pillar, sect and
+    boundary behavior while giving Agent callers a smaller contract.
     """
 
-    return calculate_chart(
+    result = calculate_chart(
         BirthInput(
             beijing_datetime=payload.true_solar_datetime,
             gender=payload.gender,
-        )
+        ),
+        include_fortune_cycles=False,
+    )
+    return BaziChartToolResult(
+        calendar=result.chart.calendar,
+        pillars=result.chart.pillars,
+        day_master=result.chart.day_master,
+        element_distribution=result.chart.element_distribution,
     )

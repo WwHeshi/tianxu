@@ -13,7 +13,6 @@ from .bazi.policy import CalculationPolicy
 class Gender(str, Enum):
     male = "male"
     female = "female"
-    other = "other"
 
 
 class Birthplace(BaseModel):
@@ -156,7 +155,7 @@ class ChartCalendar(BaseModel):
     lunar_text: str
     time_branch: str
     zodiac: str
-    destiny_type: Literal["乾造", "坤造", "命造"]
+    destiny_type: Literal["乾造", "坤造"]
 
 
 class Pillar(BaseModel):

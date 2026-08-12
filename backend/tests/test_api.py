@@ -68,6 +68,17 @@ def valid_payload() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
+async def test_preview_rejects_unsupported_gender(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/charts/preview",
+        json=valid_payload() | {"gender": "other"},
+    )
+
+    assert response.status_code == 422
+    assert "gender" in response.text
+
+
+@pytest.mark.asyncio
 async def test_health(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health")
 

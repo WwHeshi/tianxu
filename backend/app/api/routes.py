@@ -155,7 +155,7 @@ def _report_debug_trace(
                             title=f"Observation {tool_execution.sequence}",
                             category="context",
                             status="completed",
-                            detail="向下一轮模型响应返回精简命盘与当前运势。",
+                            detail="向下一轮模型响应直接返回工具原局结果；当前运势已在用户提示词中提供。",
                         ),
                     ]
                 )
