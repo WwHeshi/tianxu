@@ -153,7 +153,12 @@ def test_evaluation_tool_observation_contains_only_natal_chart() -> None:
     assert "fortune" not in observation
     assert "calculation_policy" not in observation
     year_pillar = observation["pillars"]["year"]
-    assert "self_growth_stage" in year_pillar
+    assert "name" not in year_pillar
+    assert "day_master_growth_stage" in year_pillar
+    assert "pillar_stem_growth_stage" in year_pillar
+    assert isinstance(year_pillar["xun_kong_branches"], list)
+    assert "primary_element" in year_pillar["earthly_branch"]
+    assert "element" not in year_pillar["earthly_branch"]
     assert "element" in year_pillar["heavenly_stem"]
     assert "polarity" in year_pillar["heavenly_stem"]
 
@@ -575,7 +580,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v6-react-text",
+            prompt_version="mingli-eval-v7-react-text",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,

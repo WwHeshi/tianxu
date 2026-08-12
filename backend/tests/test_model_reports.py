@@ -260,7 +260,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v15-react-text"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v16-react-text"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
         "normalize",
@@ -456,17 +456,18 @@ async def test_responses_report_uses_react_tool_loop() -> None:
     assert execution.report.chart_overview == "命盘概览内容"
     assert "output" in execution.raw_response
     assert "normalized_input" not in execution.context
-    assert "calendar" in execution.context
-    assert "element_distribution" in execution.context
+    assert "calendar" not in execution.context
+    assert "element_distribution" not in execution.context
     assert "calculation_policy" not in execution.context
     assert "engine" not in execution.context
     assert "limitations" not in execution.context
-    assert "day_master" in execution.context
+    assert "day_master" not in execution.context
     assert "chart_reliability_warnings" not in execution.context
     assert len(requests) == 2
     first_body = json.loads(requests[0].content)
     second_body = json.loads(requests[1].content)
     assert first_body["tool_choice"] == "auto"
+    assert "max_output_tokens" not in first_body
     assert first_body["tools"][0]["name"] == "calculate_bazi_chart"
     assert "pillars" not in first_body["input"][0]["content"]
     user_content = first_body["input"][0]["content"]
@@ -861,6 +862,7 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     first_body = json.loads(requests[0].content)
     second_body = json.loads(requests[1].content)
     assert first_body["tool_choice"] == "auto"
+    assert "max_tokens" not in first_body
     assert first_body["tools"][0]["function"]["name"] == "calculate_bazi_chart"
     assert "必须且只能包含以下 8 个字段" in first_body["messages"][0]["content"]
     assert "chart_overview：命盘整体概述" in first_body["messages"][0]["content"]

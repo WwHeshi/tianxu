@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from ..schemas import (
     BirthInput,
-    ChartCalendar,
     Component,
-    ElementDistribution,
     Gender,
-    Pillars,
+    HiddenStem,
+    Pillar,
 )
 from .engine import calculate_chart
 
@@ -40,15 +39,66 @@ class BaziChartToolInput(BaseModel):
         return value
 
 
+class BaziChartToolEarthlyBranch(BaseModel):
+    """Earthly-branch facts with an explicit primary-element label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    primary_element: str
+    polarity: Literal["yang", "yin"]
+    hidden_stems: list[HiddenStem]
+
+
+class BaziChartToolPillar(BaseModel):
+    """Unambiguous pillar shape exposed to Agent models."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gan_zhi: str
+    heavenly_stem: Component
+    earthly_branch: BaziChartToolEarthlyBranch
+    day_master_growth_stage: str
+    pillar_stem_growth_stage: str
+    xun_kong_branches: list[str]
+    na_yin: str
+    shen_sha: list[str]
+
+
+class BaziChartToolPillars(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    year: BaziChartToolPillar
+    month: BaziChartToolPillar
+    day: BaziChartToolPillar
+    hour: BaziChartToolPillar
+
+
 class BaziChartToolResult(BaseModel):
     """Final Agent observation containing only natal-chart facts."""
 
     model_config = ConfigDict(extra="forbid")
 
-    calendar: ChartCalendar
-    pillars: Pillars
-    day_master: Component
-    element_distribution: ElementDistribution
+    pillars: BaziChartToolPillars
+
+
+def _tool_pillar(pillar: Pillar) -> BaziChartToolPillar:
+    branch = pillar.earthly_branch
+    return BaziChartToolPillar(
+        gan_zhi=pillar.gan_zhi,
+        heavenly_stem=pillar.heavenly_stem,
+        earthly_branch=BaziChartToolEarthlyBranch(
+            symbol=branch.symbol,
+            primary_element=branch.element,
+            polarity=branch.polarity,
+            hidden_stems=branch.hidden_stems,
+        ),
+        day_master_growth_stage=pillar.growth_stage,
+        pillar_stem_growth_stage=pillar.self_growth_stage,
+        xun_kong_branches=list(pillar.xun_kong),
+        na_yin=pillar.na_yin,
+        shen_sha=pillar.shen_sha,
+    )
 
 
 def bazi_chart_tool_definition() -> dict[str, Any]:
@@ -96,8 +146,10 @@ def run_bazi_chart_tool(payload: BaziChartToolInput) -> BaziChartToolResult:
         include_fortune_cycles=False,
     )
     return BaziChartToolResult(
-        calendar=result.chart.calendar,
-        pillars=result.chart.pillars,
-        day_master=result.chart.day_master,
-        element_distribution=result.chart.element_distribution,
+        pillars=BaziChartToolPillars(
+            year=_tool_pillar(result.chart.pillars.year),
+            month=_tool_pillar(result.chart.pillars.month),
+            day=_tool_pillar(result.chart.pillars.day),
+            hour=_tool_pillar(result.chart.pillars.hour),
+        ),
     )

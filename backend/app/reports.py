@@ -36,7 +36,7 @@ from .schemas import (
     MonthlyFortune,
 )
 
-PROMPT_VERSION = "bazi-report-v15-react-text"
+PROMPT_VERSION = "bazi-report-v16-react-text"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0
@@ -62,9 +62,10 @@ REPORT_INSTRUCTIONS = """你是采用 ReAct 工作方式的八字命盘报告 Ag
 5. 每一节应具体对应输入命盘，避免空泛套话；若数据不足，应直接说明局限。
 6. 当前运势只讨论输入给出的当前大运、流年、流月，不推测未提供的完整时间线。
 7. shen_sha 仅作辅助参考，不得依据单一神煞作吉凶断言。
-8. 明确区分输入中的确定性事实与基于事实的传统解释，不得声称引擎已经计算输入未提供的结论。
-9. 不得在最终回答中展示内部思考、ReAct 推理过程、工具调用过程或 Observation 原文。
-10. 严格返回指定 JSON 结构，不添加其他字段。"""
+8. 工具结果中的日主读取 pillars.day.heavenly_stem。
+9. 明确区分输入中的确定性事实与基于事实的传统解释，不得声称引擎已经计算输入未提供的结论。
+10. 不得在最终回答中展示内部思考、ReAct 推理过程、工具调用过程或 Observation 原文。
+11. 严格返回指定 JSON 结构，不添加其他字段。"""
 
 CHAT_COMPLETIONS_OUTPUT_INSTRUCTIONS = """
 
@@ -510,7 +511,6 @@ async def generate_structured_report(
                     "tools": [responses_bazi_tool_definition()],
                     "tool_choice": "auto",
                     "parallel_tool_calls": False,
-                    "max_output_tokens": 5000,
                     "store": False,
                     "text": {
                         "format": {
@@ -527,7 +527,6 @@ async def generate_structured_report(
                     "messages": deepcopy(chat_messages),
                     "tools": [chat_bazi_tool_definition()],
                     "tool_choice": "auto",
-                    "max_tokens": 5000,
                     "stream": False,
                 }
 

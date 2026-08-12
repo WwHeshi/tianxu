@@ -59,16 +59,31 @@ def test_chart_tool_returns_natal_chart_without_fortune_cycles() -> None:
         BirthInput(beijing_datetime="1974-04-28T16:40:00", gender="male")
     )
 
-    assert tool_result.calendar == legacy_result.chart.calendar
-    assert tool_result.pillars == legacy_result.chart.pillars
-    assert tool_result.day_master == legacy_result.chart.day_master
-    assert tool_result.element_distribution == legacy_result.chart.element_distribution
-    assert set(tool_result.model_dump()) == {
-        "calendar",
-        "pillars",
-        "day_master",
-        "element_distribution",
+    assert set(tool_result.model_dump()) == {"pillars"}
+    year = tool_result.pillars.year.model_dump()
+    assert set(year) == {
+        "gan_zhi",
+        "heavenly_stem",
+        "earthly_branch",
+        "day_master_growth_stage",
+        "pillar_stem_growth_stage",
+        "xun_kong_branches",
+        "na_yin",
+        "shen_sha",
     }
+    assert year["earthly_branch"]["primary_element"] == (
+        legacy_result.chart.pillars.year.earthly_branch.element
+    )
+    assert "element" not in year["earthly_branch"]
+    assert year["day_master_growth_stage"] == legacy_result.chart.pillars.year.growth_stage
+    assert year["pillar_stem_growth_stage"] == (
+        legacy_result.chart.pillars.year.self_growth_stage
+    )
+    assert year["xun_kong_branches"] == list(legacy_result.chart.pillars.year.xun_kong)
+    assert "name" not in year
+    assert "growth_stage" not in year
+    assert "self_growth_stage" not in year
+    assert "xun_kong" not in year
     assert legacy_result.chart.fortune_cycles is not None
     assert tuple(
         pillar.gan_zhi

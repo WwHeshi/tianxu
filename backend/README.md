@@ -14,8 +14,10 @@ FastAPI 后端，提供确定性排盘、加密模型设置和一次性结构化
 调用方必须先完成地点、时区和真太阳时换算；工具不会再次校时。它仍复用现有确定性排盘
 引擎，但只计算和返回原局，不生成大运、流年、流月时间线。四柱、节气边界和子初换日
 口径与原排盘接口一致。`gender` 仍用于命造类型和部分神煞计算，因此为必填字段。
-工具结果就是直接发送给模型的 Observation，固定包含 `calendar`、`pillars`、`day_master`
-和 `element_distribution` 四个顶层字段，不再经过二次上下文转换。
+工具结果就是直接发送给模型的 Observation，固定只包含 `pillars`，不再经过二次上下文
+转换。日主直接读取 `pillars.day.heavenly_stem`。工具柱结构删除
+重复的 `name`，使用 `day_master_growth_stage`、`pillar_stem_growth_stage`、
+`xun_kong_branches` 和地支 `primary_element` 等明确字段名；普通排盘预览接口仍保持原结构。
 
 ## 本地运行
 
