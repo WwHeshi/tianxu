@@ -1,10 +1,8 @@
-"""Single-tool ReAct orchestration for structured BaZi reports."""
+"""Structured BaZi report configuration over the shared tool-calling agent."""
 
 import json
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
-from time import perf_counter
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -12,20 +10,10 @@ import httpx
 from pydantic import ValidationError
 
 from .bazi.tool import (
-    BAZI_CHART_TOOL_NAME,
     BaziChartToolInput,
     run_bazi_chart_tool,
 )
 from .models import ModelCredential
-from .react_agent import (
-    MAX_REACT_MODEL_CALLS,
-    ReactProtocolError,
-    chat_bazi_tool_definition,
-    chat_tool_call,
-    responses_bazi_tool_definition,
-    responses_tool_call,
-    validate_bazi_tool_input,
-)
 from .schemas import (
     AnnualFortune,
     BaziReport,
@@ -35,8 +23,14 @@ from .schemas import (
     FortunePillar,
     MonthlyFortune,
 )
+from .tool_calling_agent import (
+    ToolCallingModelCall,
+    ToolCallingRunError,
+    ToolCallingToolExecution,
+    run_tool_calling_agent,
+)
 
-PROMPT_VERSION = "bazi-report-v16-react-text"
+PROMPT_VERSION = "bazi-report-v18-tool-text"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0
@@ -48,10 +42,8 @@ REPORT_JSON_SCHEMA = {
     "additionalProperties": False,
 }
 
-REPORT_INSTRUCTIONS = """你是采用 ReAct 工作方式的八字命盘报告 Agent。
-你可以调用 calculate_bazi_chart，并自行判断是否需要使用工具。
-如果调用工具，其返回内容就是 Observation，必须作为权威命盘事实；不得重新排盘、改写或质疑四柱。
-如果不需要工具，也可以直接生成最终报告。
+REPORT_INSTRUCTIONS = """你是八字命盘报告 Agent。
+调用 calculate_bazi_chart 后，必须以返回结果为权威命盘事实，不得重新排盘、改写或质疑四柱。
 
 必须遵守：
 1. 调用工具时，参数必须逐字采用用户提示词给出的 gender 与 true_solar_datetime，
@@ -61,11 +53,10 @@ REPORT_INSTRUCTIONS = """你是采用 ReAct 工作方式的八字命盘报告 Ag
 4. 不作疾病诊断、寿命判断、灾祸断言，不给出确定性的法律、投资或医疗建议。
 5. 每一节应具体对应输入命盘，避免空泛套话；若数据不足，应直接说明局限。
 6. 当前运势只讨论输入给出的当前大运、流年、流月，不推测未提供的完整时间线。
-7. shen_sha 仅作辅助参考，不得依据单一神煞作吉凶断言。
-8. 工具结果中的日主读取 pillars.day.heavenly_stem。
-9. 明确区分输入中的确定性事实与基于事实的传统解释，不得声称引擎已经计算输入未提供的结论。
-10. 不得在最终回答中展示内部思考、ReAct 推理过程、工具调用过程或 Observation 原文。
-11. 严格返回指定 JSON 结构，不添加其他字段。"""
+7. 神煞仅作辅助参考，不得依据单一神煞作吉凶断言。
+8. 明确区分输入中的确定性事实与基于事实的传统解释，不得声称引擎已经计算输入未提供的结论。
+9. 不得在最终回答中展示内部推理或工具调用过程。
+10. 严格返回指定 JSON 结构，不添加其他字段。"""
 
 CHAT_COMPLETIONS_OUTPUT_INSTRUCTIONS = """
 
@@ -79,7 +70,7 @@ JSON 对象必须且只能包含以下 8 个字段；所有字段均为非空字
 - current_fortune：结合输入提供的当前大运、流年和流月分析当前阶段。
 - recommendations：给出克制、具体、可执行的建议。
 - limitations：说明本次分析的数据边界、不确定性与传统文化参考属性。
-所有结论只能依据用户资料与可用的工具 Observation；资料不足时应明确说明，不得虚构命盘数据。
+所有结论只能依据用户资料与工具结果；资料不足时应明确说明，不得虚构命盘数据。
 字段值中不要嵌套 JSON。"""
 
 
@@ -114,20 +105,8 @@ class ModelOutputFormatError(ModelProviderError):
         self.tool_executions = tool_executions
 
 
-@dataclass(frozen=True)
-class ReportModelCall:
-    stage: str
-    request_body: dict[str, Any]
-    raw_response: dict[str, Any]
-    latency_ms: int
-
-
-@dataclass(frozen=True)
-class ReportToolExecution:
-    name: str
-    input: dict[str, Any]
-    output: dict[str, Any]
-    duration_ms: int
+ReportModelCall = ToolCallingModelCall
+ReportToolExecution = ToolCallingToolExecution
 
 
 @dataclass(frozen=True)
@@ -324,37 +303,6 @@ def _current_fortune_context(
     }
 
 
-def _extract_responses_output_text(payload: dict[str, Any]) -> str:
-    direct = payload.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct
-    for output in payload.get("output", []):
-        if not isinstance(output, dict) or output.get("type") != "message":
-            continue
-        for content in output.get("content", []):
-            if not isinstance(content, dict):
-                continue
-            if content.get("type") == "refusal":
-                raise ModelProviderError("模型拒绝生成这份报告，请调整输入后重试。")
-            text = content.get("text")
-            if content.get("type") == "output_text" and isinstance(text, str):
-                return text
-    raise ModelProviderError("模型没有返回可用的结构化报告。")
-
-
-def _extract_chat_output_text(payload: dict[str, Any]) -> str:
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        raise ModelProviderError("模型没有返回可用的报告内容。")
-    message = choices[0].get("message")
-    if not isinstance(message, dict):
-        raise ModelProviderError("模型没有返回可用的报告内容。")
-    content = message.get("content")
-    if isinstance(content, str) and content.strip():
-        return content
-    raise ModelProviderError("模型没有返回可用的报告内容。")
-
-
 def _current_fortune_prompt(context: dict[str, Any] | None) -> str:
     if context is None:
         return "当前大运：未提供\n当前流年：未提供\n当前流月：未提供"
@@ -394,44 +342,6 @@ def _report_user_prompt(
     )
 
 
-async def _post_model_request(
-    *,
-    client: httpx.AsyncClient,
-    url: str,
-    api_key: str,
-    body: dict[str, Any],
-) -> tuple[dict[str, Any], int]:
-    started = perf_counter()
-    try:
-        response = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-        )
-    except httpx.TimeoutException as exc:
-        raise ModelProviderError("模型服务响应超时，请稍后重试。") from exc
-    except httpx.RequestError as exc:
-        raise ModelProviderError("无法连接模型服务，请检查 Base URL。") from exc
-    latency_ms = round((perf_counter() - started) * 1000)
-
-    if response.status_code in {401, 403}:
-        raise ModelProviderError("模型服务鉴权失败，请重新检查 API 密钥。")
-    if response.status_code == 429:
-        raise ModelProviderError("模型服务当前请求过多，请稍后重试。")
-    if not response.is_success:
-        raise ModelProviderError(f"模型服务调用失败（HTTP {response.status_code}）。")
-    try:
-        payload = response.json()
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise ModelProviderError("模型服务没有返回有效的 JSON 响应。") from exc
-    if not isinstance(payload, dict):
-        raise ModelProviderError("模型服务没有返回有效的 JSON 响应。")
-    return payload, latency_ms
-
-
 def _parse_report_json(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -465,191 +375,71 @@ async def generate_structured_report(
     )
     user_prompt = _report_user_prompt(expected_tool_input, current_fortune)
     if credential.api_protocol == "responses":
-        url = f"{credential.base_url.rstrip('/')}/responses"
         system_prompt = REPORT_INSTRUCTIONS
-        responses_input: list[dict[str, Any]] = [
-            {"role": "user", "content": user_prompt}
-        ]
-        chat_messages: list[dict[str, Any]] = []
     elif credential.api_protocol == "chat_completions":
-        url = f"{credential.base_url.rstrip('/')}/chat/completions"
         system_prompt = REPORT_INSTRUCTIONS + CHAT_COMPLETIONS_OUTPUT_INSTRUCTIONS
-        responses_input = []
-        chat_messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
     else:
         raise ModelProviderError("不支持已保存的 API 协议，请重新保存模型设置。")
 
     timeout = httpx.Timeout(MODEL_TIMEOUT_SECONDS, connect=15.0)
-    model_calls: list[ReportModelCall] = []
-    tool_executions: list[ReportToolExecution] = []
-    last_request_body: dict[str, Any] = {}
-    last_payload: dict[str, Any] = {}
-
-    def output_error(message: str) -> ModelOutputFormatError:
-        return ModelOutputFormatError(
-            message,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            endpoint=url,
-            request_body=last_request_body,
-            raw_response=last_payload,
-            model_latency_ms=sum(call.latency_ms for call in model_calls),
-            model_calls=tuple(model_calls),
-            tool_executions=tuple(tool_executions),
-        )
-
     async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
-        for _ in range(MAX_REACT_MODEL_CALLS):
-            if credential.api_protocol == "responses":
-                request_body = {
-                    "model": credential.model,
-                    "instructions": system_prompt,
-                    "input": deepcopy(responses_input),
-                    "tools": [responses_bazi_tool_definition()],
-                    "tool_choice": "auto",
-                    "parallel_tool_calls": False,
-                    "store": False,
-                    "text": {
-                        "format": {
-                            "type": "json_schema",
-                            "name": "bazi_report",
-                            "strict": True,
-                            "schema": REPORT_JSON_SCHEMA,
-                        }
-                    },
-                }
-            else:
-                request_body = {
-                    "model": credential.model,
-                    "messages": deepcopy(chat_messages),
-                    "tools": [chat_bazi_tool_definition()],
-                    "tool_choice": "auto",
-                    "stream": False,
-                }
-
-            payload, latency_ms = await _post_model_request(
-                client=client,
-                url=url,
+        try:
+            execution = await run_tool_calling_agent(
+                api_protocol=credential.api_protocol,
+                model=credential.model,
+                base_url=credential.base_url,
                 api_key=api_key,
-                body=request_body,
-            )
-            last_request_body = request_body
-            last_payload = payload
-            try:
-                requested_call = (
-                    responses_tool_call(payload)
-                    if credential.api_protocol == "responses"
-                    else chat_tool_call(payload)
-                )
-            except ReactProtocolError as exc:
-                model_calls.append(
-                    ReportModelCall(
-                        stage="action_selection",
-                        request_body=request_body,
-                        raw_response=payload,
-                        latency_ms=latency_ms,
-                    )
-                )
-                raise output_error(str(exc)) from exc
-
-            if requested_call is not None:
-                model_calls.append(
-                    ReportModelCall(
-                        stage="action_selection",
-                        request_body=request_body,
-                        raw_response=payload,
-                        latency_ms=latency_ms,
-                    )
-                )
-                try:
-                    tool_input = validate_bazi_tool_input(
-                        requested_call,
-                        expected_tool_input,
-                    )
-                except ReactProtocolError as exc:
-                    raise output_error(str(exc)) from exc
-
-                tool_started = perf_counter()
-                tool_result = run_bazi_chart_tool(tool_input)
-                tool_duration_ms = round((perf_counter() - tool_started) * 1000)
-                tool_output = tool_result.model_dump(mode="json")
-                tool_executions.append(
-                    ReportToolExecution(
-                        name=BAZI_CHART_TOOL_NAME,
-                        input=tool_input.model_dump(mode="json"),
-                        output=tool_output,
-                        duration_ms=tool_duration_ms,
-                    )
-                )
-                observation = json.dumps(
-                    tool_output,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-
-                if credential.api_protocol == "responses":
-                    continuation_items = payload.get("output")
-                    if not isinstance(continuation_items, list):
-                        continuation_items = [requested_call.continuation]
-                    responses_input.extend(deepcopy(continuation_items))
-                    responses_input.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": requested_call.call_id,
-                            "output": observation,
-                        }
-                    )
-                else:
-                    chat_messages.append(deepcopy(requested_call.continuation))
-                    chat_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": requested_call.call_id,
-                            "name": BAZI_CHART_TOOL_NAME,
-                            "content": observation,
-                        }
-                    )
-                continue
-
-            model_calls.append(
-                ReportModelCall(
-                    stage="final_answer",
-                    request_body=request_body,
-                    raw_response=payload,
-                    latency_ms=latency_ms,
-                )
-            )
-            try:
-                output_text = (
-                    _extract_responses_output_text(payload)
-                    if credential.api_protocol == "responses"
-                    else _extract_chat_output_text(payload)
-                )
-                raw_report = _parse_report_json(output_text)
-                report = BaziReport.model_validate(raw_report)
-            except ModelProviderError as exc:
-                raise output_error(str(exc)) from exc
-            except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-                raise output_error("模型返回的报告结构不符合约定，请重试。") from exc
-
-            return ReportGenerationResult(
-                report=report,
-                context=(
-                    tool_executions[-1].output
-                    if tool_executions
-                    else {"birth": expected_tool_input.model_dump(mode="json")}
-                ),
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                endpoint=url,
-                request_body=request_body,
-                raw_response=payload,
-                model_latency_ms=sum(call.latency_ms for call in model_calls),
-                model_calls=tuple(model_calls),
-                tool_executions=tuple(tool_executions),
+                output_schema_name="bazi_report",
+                output_schema=REPORT_JSON_SCHEMA,
+                expected_tool_input=expected_tool_input,
+                execute_tool=run_bazi_chart_tool,
+                client=client,
             )
+        except ToolCallingRunError as exc:
+            if exc.provider_error:
+                raise ModelProviderError(str(exc)) from exc
+            raise ModelOutputFormatError(
+                str(exc),
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                endpoint=exc.endpoint,
+                request_body=exc.request_body,
+                raw_response=exc.raw_response,
+                model_latency_ms=exc.model_latency_ms,
+                model_calls=exc.model_calls,
+                tool_executions=exc.tool_executions,
+            ) from exc
 
-    raise output_error(f"ReAct 循环超过 {MAX_REACT_MODEL_CALLS} 次模型响应，已安全终止。")
+    try:
+        report = BaziReport.model_validate(_parse_report_json(execution.output_text))
+    except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+        raise ModelOutputFormatError(
+            "模型返回的报告结构不符合约定，请重试。",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            endpoint=execution.endpoint,
+            request_body=execution.request_body,
+            raw_response=execution.raw_response,
+            model_latency_ms=execution.model_latency_ms,
+            model_calls=execution.model_calls,
+            tool_executions=execution.tool_executions,
+        ) from exc
+
+    return ReportGenerationResult(
+        report=report,
+        context=(
+            execution.tool_executions[-1].output
+            if execution.tool_executions
+            else {"birth": expected_tool_input.model_dump(mode="json")}
+        ),
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        endpoint=execution.endpoint,
+        request_body=execution.request_body,
+        raw_response=execution.raw_response,
+        model_latency_ms=execution.model_latency_ms,
+        model_calls=execution.model_calls,
+        tool_executions=execution.tool_executions,
+    )

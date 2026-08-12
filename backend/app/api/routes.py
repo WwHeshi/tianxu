@@ -110,7 +110,7 @@ def _report_debug_trace(
         ),
         AgentTraceStep(
             id="prompt",
-            title="组装 ReAct 任务",
+            title="组装工具调用任务",
             category="prompt",
             status="completed",
             detail="用户提示词只包含报告任务及 gender、true_solar_datetime 工具参数。",
@@ -170,7 +170,7 @@ def _report_debug_trace(
                     title=f"响应 {call.sequence} · Final",
                     category="model",
                     status="completed",
-                    detail="模型结束 ReAct 循环并返回固定八章节报告。",
+                    detail="模型结束工具调用循环并返回固定八章节报告。",
                     duration_ms=call.duration_ms,
                 ),
                 AgentTraceStep(
@@ -189,7 +189,7 @@ def _report_debug_trace(
         steps.append(
             AgentTraceStep(
                 id="guard",
-                title="终止 ReAct 循环",
+                title="终止工具调用循环",
                 category="validation",
                 status="failed",
                 detail=validation_error,

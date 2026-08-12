@@ -14,7 +14,6 @@ from app.credentials import LOCAL_CREDENTIAL_SCOPE, get_credential_repository
 from app.main import app
 from app.models import ModelCredential, User
 from app.reports import (
-    MAX_REACT_MODEL_CALLS,
     ModelOutputFormatError,
     ModelProviderError,
     ReportGenerationResult,
@@ -27,6 +26,7 @@ from app.reports import (
 )
 from app.schemas import BaziReport, BirthInput
 from app.security import SecretCipher, SecretEncryptionError
+from app.tool_calling_agent import MAX_TOOL_CALLING_MODEL_CALLS
 
 MASTER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
@@ -260,7 +260,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v16-react-text"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v18-tool-text"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
         "normalize",
@@ -494,7 +494,7 @@ async def test_responses_report_uses_react_tool_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_react_agent_accepts_direct_final_without_tool_call() -> None:
+async def test_tool_calling_agent_accepts_direct_final_without_tool_call() -> None:
     chart = calculate_chart(BirthInput.model_validate(valid_payload()))
     credential = ModelCredential(
         id=1,
@@ -667,13 +667,13 @@ async def test_react_loop_stops_after_safety_limit() -> None:
             transport=httpx.MockTransport(handler),
         )
 
-    assert request_count == MAX_REACT_MODEL_CALLS
-    assert len(captured.value.model_calls) == MAX_REACT_MODEL_CALLS
-    assert len(captured.value.tool_executions) == MAX_REACT_MODEL_CALLS
+    assert request_count == MAX_TOOL_CALLING_MODEL_CALLS
+    assert len(captured.value.model_calls) == MAX_TOOL_CALLING_MODEL_CALLS
+    assert len(captured.value.tool_executions) == MAX_TOOL_CALLING_MODEL_CALLS
 
 
 @pytest.mark.asyncio
-async def test_react_agent_rejects_modified_tool_arguments() -> None:
+async def test_tool_calling_agent_rejects_modified_tool_arguments() -> None:
     chart = calculate_chart(BirthInput.model_validate(valid_payload()))
     credential = ModelCredential(
         id=1,
@@ -867,7 +867,7 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     assert "必须且只能包含以下 8 个字段" in first_body["messages"][0]["content"]
     assert "chart_overview：命盘整体概述" in first_body["messages"][0]["content"]
     assert "不要输出 Markdown 代码块" in first_body["messages"][0]["content"]
-    assert "shen_sha 仅作辅助参考" in first_body["messages"][0]["content"]
+    assert "神煞仅作辅助参考" in first_body["messages"][0]["content"]
     assert second_body["tool_choice"] == "auto"
     assert second_body["messages"][-1]["role"] == "tool"
     assert "big_luck_periods" not in second_body["messages"][-1]["content"]

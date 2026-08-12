@@ -152,15 +152,17 @@ def test_evaluation_tool_observation_contains_only_natal_chart() -> None:
 
     assert "fortune" not in observation
     assert "calculation_policy" not in observation
-    year_pillar = observation["pillars"]["year"]
+    assert set(observation) == {"年柱", "月柱", "日柱", "时柱"}
+    year_pillar = observation["年柱"]
     assert "name" not in year_pillar
-    assert "day_master_growth_stage" in year_pillar
-    assert "pillar_stem_growth_stage" in year_pillar
-    assert isinstance(year_pillar["xun_kong_branches"], list)
-    assert "primary_element" in year_pillar["earthly_branch"]
-    assert "element" not in year_pillar["earthly_branch"]
-    assert "element" in year_pillar["heavenly_stem"]
-    assert "polarity" in year_pillar["heavenly_stem"]
+    assert "主星" in year_pillar
+    assert "星运" in year_pillar
+    assert "自坐" in year_pillar
+    assert isinstance(year_pillar["空亡"], list)
+    assert "本气五行" in year_pillar["地支"]
+    assert "五行" in year_pillar["天干"]
+    assert year_pillar["天干"]["阴阳"] in {"阳", "阴"}
+    assert "副星" in year_pillar["藏干"][0]
 
 
 def test_tianxu_evaluation_chart_uses_sect_one_and_lichun_year() -> None:
@@ -172,12 +174,12 @@ def test_tianxu_evaluation_chart_uses_sect_one_and_lichun_year() -> None:
     }
     for case_id, values in expected.items():
         question = next(item for item in dataset.questions if item.case_id == case_id)
-        chart = chart_for_question(question).pillars
+        chart = chart_for_question(question)
         assert (
-            chart.year.gan_zhi,
-            chart.month.gan_zhi,
-            chart.day.gan_zhi,
-            chart.hour.gan_zhi,
+            chart.year.heavenly_stem.symbol + chart.year.earthly_branch.symbol,
+            chart.month.heavenly_stem.symbol + chart.month.earthly_branch.symbol,
+            chart.day.heavenly_stem.symbol + chart.day.earthly_branch.symbol,
+            chart.hour.heavenly_stem.symbol + chart.hour.earthly_branch.symbol,
         ) == values
 
 
@@ -240,7 +242,7 @@ async def test_model_client_requests_strict_answer_json() -> None:
         "C",
         "D",
     ]
-    assert observed["max_output_tokens"] == 65_536
+    assert "max_output_tokens" not in observed
     assert observed["text"]["format"]["schema"]["properties"]["reasoning_summary"] == {
         "type": "string",
         "minLength": 1,
@@ -325,7 +327,7 @@ async def test_model_client_runs_action_observation_final_loop() -> None:
         item for item in second_input if item.get("type") == "function_call_output"
     )
     assert observation["call_id"] == "call_chart_1"
-    assert "pillars" in json.loads(observation["output"])
+    assert set(json.loads(observation["output"])) == {"年柱", "月柱", "日柱", "时柱"}
 
 
 @pytest.mark.asyncio
@@ -382,7 +384,7 @@ async def test_chat_completion_reports_reasoning_length_exhaustion() -> None:
                 client=client,
             )
 
-    assert observed["max_tokens"] == 65_536
+    assert "max_tokens" not in observed
     assert observed["messages"][0]["content"] == SYSTEM_PROMPT
     assert observed["tool_choice"] == "auto"
     assert observed["tools"][0]["function"]["name"] == "calculate_bazi_chart"
@@ -515,7 +517,7 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
     assert len(trace.json()["tool_executions"]) == 1
     assert [step["title"] for step in trace.json()["steps"]] == [
         "读取评测题目",
-        "组装 ReAct 任务",
+        "组装工具调用任务",
         "响应 1 · Action",
         "执行工具 1",
         "Observation 1",
@@ -580,7 +582,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v7-react-text",
+            prompt_version="mingli-eval-v9-tool-text",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,

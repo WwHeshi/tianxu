@@ -16,12 +16,18 @@ def test_chart_tool_has_only_normalized_time_and_gender_inputs() -> None:
     schema = definition["input_schema"]
 
     assert definition["name"] == BAZI_CHART_TOOL_NAME
+    assert definition["description"] == "按已校正的真太阳时和性别计算八字四柱原局。"
     assert set(schema["properties"]) == {"gender", "true_solar_datetime"}
     assert set(schema["required"]) == {"gender", "true_solar_datetime"}
     assert schema["additionalProperties"] is False
     assert schema["properties"]["gender"]["enum"] == ["male", "female"]
+    assert "description" not in schema["properties"]["gender"]
+    assert "format" not in schema["properties"]["true_solar_datetime"]
+    assert schema["properties"]["true_solar_datetime"]["pattern"] == (
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$"
+    )
     assert schema["properties"]["true_solar_datetime"]["description"] == (
-        "已完成校正的真太阳时，格式为 YYYY-MM-DDTHH:mm:ss，工具不再换算。"
+        "已校正的真太阳出生时间，不得包含时区或 UTC 偏移。"
     )
 
 
@@ -59,38 +65,48 @@ def test_chart_tool_returns_natal_chart_without_fortune_cycles() -> None:
         BirthInput(beijing_datetime="1974-04-28T16:40:00", gender="male")
     )
 
-    assert set(tool_result.model_dump()) == {"pillars"}
-    year = tool_result.pillars.year.model_dump()
+    observation = tool_result.model_dump(mode="json")
+    assert set(observation) == {"年柱", "月柱", "日柱", "时柱"}
+    year = observation["年柱"]
     assert set(year) == {
-        "gan_zhi",
-        "heavenly_stem",
-        "earthly_branch",
-        "day_master_growth_stage",
-        "pillar_stem_growth_stage",
-        "xun_kong_branches",
-        "na_yin",
-        "shen_sha",
+        "主星",
+        "天干",
+        "地支",
+        "藏干",
+        "星运",
+        "自坐",
+        "空亡",
+        "纳音",
+        "神煞",
     }
-    assert year["earthly_branch"]["primary_element"] == (
+    assert year["主星"] == legacy_result.chart.pillars.year.heavenly_stem.ten_god
+    assert year["地支"]["本气五行"] == (
         legacy_result.chart.pillars.year.earthly_branch.element
     )
-    assert "element" not in year["earthly_branch"]
-    assert year["day_master_growth_stage"] == legacy_result.chart.pillars.year.growth_stage
-    assert year["pillar_stem_growth_stage"] == (
+    assert year["天干"]["阴阳"] == "阳"
+    assert year["地支"]["阴阳"] == "阳"
+    assert "十神" not in year["天干"]
+    assert "藏干" not in year["地支"]
+    assert set(year["藏干"][0]) == {"字", "五行", "阴阳", "副星"}
+    assert year["藏干"][0]["副星"] == (
+        legacy_result.chart.pillars.year.earthly_branch.hidden_stems[0].ten_god
+    )
+    assert year["星运"] == legacy_result.chart.pillars.year.growth_stage
+    assert year["自坐"] == (
         legacy_result.chart.pillars.year.self_growth_stage
     )
-    assert year["xun_kong_branches"] == list(legacy_result.chart.pillars.year.xun_kong)
+    assert year["空亡"] == list(legacy_result.chart.pillars.year.xun_kong)
     assert "name" not in year
     assert "growth_stage" not in year
     assert "self_growth_stage" not in year
     assert "xun_kong" not in year
     assert legacy_result.chart.fortune_cycles is not None
     assert tuple(
-        pillar.gan_zhi
+        pillar.heavenly_stem.symbol + pillar.earthly_branch.symbol
         for pillar in (
-            tool_result.pillars.year,
-            tool_result.pillars.month,
-            tool_result.pillars.day,
-            tool_result.pillars.hour,
+            tool_result.year,
+            tool_result.month,
+            tool_result.day,
+            tool_result.hour,
         )
     ) == ("甲寅", "戊辰", "己亥", "壬申")

@@ -9,13 +9,12 @@ from typing import Any
 from ...bazi.tool import BaziChartToolInput, BaziChartToolResult, run_bazi_chart_tool
 from .dataset import EvaluationQuestion
 
-PROMPT_VERSION = "mingli-eval-v7-react-text"
+PROMPT_VERSION = "mingli-eval-v9-tool-text"
 YEAR_PATTERN = re.compile(r"(?<!\d)(?:18|19|20)\d{2}(?!\d)")
 
-SYSTEM_PROMPT = """你是采用 ReAct 工作方式的天序八字选择题 Agent。
+SYSTEM_PROMPT = """你是天序八字选择题 Agent。
 唯一任务是从 A、B、C、D 中选出最符合命盘的一项。
-你可以按需调用 calculate_bazi_chart，也可以直接返回最终答案。
-如果调用工具，其 Observation 是权威命盘事实，不得重新排盘、改写四柱或质疑计算口径。
+调用 calculate_bazi_chart 后，必须以返回结果为权威命盘事实，不得重新排盘、改写或质疑四柱。
 这是公开历史选择题的封闭分类评测，不是对现实个人作确定性断言，也不构成医疗、法律或投资建议。
 
 必须遵守以下输出规则：
@@ -26,7 +25,6 @@ SYSTEM_PROMPT = """你是采用 ReAct 工作方式的天序八字选择题 Agent
 5. answer 必须是 A、B、C、D 之一；confidence 必须是 0 到 100 的整数。
 6. reasoning_summary 必须在 120 个汉字以内，只概括最关键依据。
    不要进行长篇推演，优先确保完整输出 JSON。
-7. 工具结果中的日主读取 pillars.day.heavenly_stem。
 
 严格按此格式返回：
 {"answer":"A","confidence":75,"reasoning_summary":"简要依据"}"""

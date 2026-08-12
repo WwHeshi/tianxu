@@ -186,7 +186,7 @@ def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
         ),
         EvaluationTraceStep(
             id="prompt",
-            title="组装 ReAct 任务",
+            title="组装工具调用任务",
             category="prompt",
             status="completed" if prompt_ready else "failed",
             detail=(
@@ -247,7 +247,7 @@ def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
                     title=f"响应 {call.sequence} · Final",
                     category="model",
                     status="completed",
-                    detail="模型结束 ReAct 循环并返回选择题答案。",
+                    detail="模型结束工具调用循环并返回选择题答案。",
                     duration_ms=call.duration_ms,
                 )
             )
