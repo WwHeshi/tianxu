@@ -288,7 +288,7 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .agent-debug-details summary::-webkit-details-marker { display: none; }
 .agent-debug-details summary::after { position: absolute; top: 9px; right: 13px; color: var(--quiet); content: "+"; font-size: 14px; font-weight: 400; }
 .agent-debug-details details[open] summary::after { content: "−"; }
-.agent-debug-details pre { max-height: 360px; overflow: auto; margin: 0; padding: 14px; color: #dce7e3; background: #182623; border-top: 1px solid var(--line); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 10px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-debug-details pre { overflow: visible; margin: 0; padding: 14px; color: #dce7e3; background: #182623; border-top: 1px solid var(--line); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 10px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-debug-redacted { margin: 10px 0 0; color: var(--quiet); text-align: right; font-size: 9px; }
 .report-sections { padding: 3px 26px; }
 .report-sections > section { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 15px; padding: 22px 0; border-bottom: 1px solid var(--line); }
