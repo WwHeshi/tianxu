@@ -1,0 +1,118 @@
+"""Provider-neutral Agent tool registration, validation and dispatch."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Any
+
+from pydantic import BaseModel, ValidationError
+
+
+class AgentToolError(RuntimeError):
+    """Base error raised while validating or dispatching an Agent tool call."""
+
+
+class AgentToolInputError(AgentToolError):
+    """The model supplied malformed arguments for an allowed tool."""
+
+
+class AgentToolAuthorizationError(AgentToolError):
+    """The model attempted to change server-bound tool arguments."""
+
+
+class AgentToolExecutionError(AgentToolError):
+    """An allowed tool failed while executing validated arguments."""
+
+
+@dataclass(frozen=True)
+class AgentTool:
+    """One tool bound to the context and permissions of a specific Agent run."""
+
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    input_model: type[BaseModel]
+    execute: Callable[[BaseModel], BaseModel]
+    authorize: Callable[[BaseModel], None] | None = None
+
+    def responses_definition(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.input_schema,
+            "strict": True,
+        }
+
+    def chat_completions_definition(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.input_schema,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class AgentToolDispatchResult:
+    """Validated input and serialized output from one dispatched tool call."""
+
+    name: str
+    input: dict[str, Any]
+    output: dict[str, Any]
+
+
+class AgentToolRegistry:
+    """The explicit allow-list of tools available to one Agent invocation."""
+
+    def __init__(self, tools: Iterable[AgentTool]) -> None:
+        registered: dict[str, AgentTool] = {}
+        for tool in tools:
+            if not tool.name:
+                raise ValueError("Agent tool name must not be empty")
+            if tool.name in registered:
+                raise ValueError(f"duplicate Agent tool name: {tool.name}")
+            registered[tool.name] = tool
+        if not registered:
+            raise ValueError("an Agent tool registry must contain at least one tool")
+        self._tools = registered
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._tools)
+
+    def definitions(self, protocol: str) -> list[dict[str, Any]]:
+        if protocol == "responses":
+            return [tool.responses_definition() for tool in self._tools.values()]
+        if protocol == "chat_completions":
+            return [tool.chat_completions_definition() for tool in self._tools.values()]
+        raise ValueError(f"unsupported API protocol: {protocol}")
+
+    def dispatch(self, name: str, arguments: str) -> AgentToolDispatchResult:
+        tool = self._tools.get(name)
+        if tool is None:
+            raise AgentToolAuthorizationError(f"模型调用了不允许的工具：{name}。")
+
+        try:
+            raw_arguments = json.loads(arguments)
+            tool_input = tool.input_model.model_validate(raw_arguments)
+        except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+            raise AgentToolInputError(f"模型生成的 {name} 工具参数无效。") from exc
+
+        if tool.authorize is not None:
+            tool.authorize(tool_input)
+        try:
+            tool_output = tool.execute(tool_input)
+        except AgentToolError:
+            raise
+        except Exception as exc:
+            raise AgentToolExecutionError(f"{name} 工具执行失败：{exc}") from exc
+        return AgentToolDispatchResult(
+            name=name,
+            input=tool_input.model_dump(mode="json"),
+            output=tool_output.model_dump(mode="json"),
+        )

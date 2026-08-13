@@ -9,7 +9,13 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from ...bazi.tool import BaziChartToolInput, BaziChartToolResult, run_bazi_chart_tool
+from ...agent_tools import AgentToolRegistry
+from ...bazi.tool import (
+    BaziChartToolInput,
+    BaziChartToolResult,
+    bazi_chart_agent_tool,
+    run_bazi_chart_tool,
+)
 from ...models import EvaluationRun
 from ...tool_calling_agent import (
     ToolCallingModelCall,
@@ -179,8 +185,14 @@ async def request_evaluation_answer(
             user_prompt=user_prompt,
             output_schema_name="mingli_evaluation_answer",
             output_schema=ANSWER_JSON_SCHEMA,
-            expected_tool_input=expected_tool_input,
-            execute_tool=execute_tool,
+            tool_registry=AgentToolRegistry(
+                [
+                    bazi_chart_agent_tool(
+                        expected_tool_input,
+                        execute_tool=execute_tool,
+                    )
+                ]
+            ),
             client=client,
         )
     except ToolCallingRunError as exc:

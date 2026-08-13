@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..agent_tools import AgentTool, AgentToolAuthorizationError
 from ..schemas import (
     BirthInput,
     Gender,
@@ -169,4 +171,32 @@ def run_bazi_chart_tool(payload: BaziChartToolInput) -> BaziChartToolResult:
         month=_tool_pillar(result.chart.pillars.month),
         day=_tool_pillar(result.chart.pillars.day),
         hour=_tool_pillar(result.chart.pillars.hour),
+    )
+
+
+def bazi_chart_agent_tool(
+    expected_input: BaziChartToolInput,
+    *,
+    execute_tool: Callable[[BaziChartToolInput], BaziChartToolResult] = run_bazi_chart_tool,
+) -> AgentTool:
+    """Bind the authoritative birth input for one Agent invocation."""
+
+    definition = bazi_chart_tool_definition()
+
+    def authorize(payload: BaseModel) -> None:
+        if payload != expected_input:
+            raise AgentToolAuthorizationError("模型擅自修改了排盘工具参数，已拒绝执行。")
+
+    def execute(payload: BaseModel) -> BaseModel:
+        if not isinstance(payload, BaziChartToolInput):  # pragma: no cover - registry invariant
+            raise TypeError("calculate_bazi_chart received an unexpected input model")
+        return execute_tool(payload)
+
+    return AgentTool(
+        name=definition["name"],
+        description=definition["description"],
+        input_schema=definition["input_schema"],
+        input_model=BaziChartToolInput,
+        execute=execute,
+        authorize=authorize,
     )

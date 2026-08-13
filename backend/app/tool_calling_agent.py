@@ -1,22 +1,18 @@
-"""Shared single-tool calling loop for report and evaluation agents."""
+"""Shared provider-neutral tool-calling loop for Tianxu agents."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Literal
 
 import httpx
-from pydantic import ValidationError
 
-from .bazi.tool import (
-    BAZI_CHART_TOOL_NAME,
-    BaziChartToolInput,
-    BaziChartToolResult,
-    bazi_chart_tool_definition,
+from .agent_tools import (
+    AgentToolError,
+    AgentToolRegistry,
 )
 
 ApiProtocol = Literal["responses", "chat_completions"]
@@ -101,29 +97,6 @@ class ToolCallingRunError(RuntimeError):
         self.fatal = fatal
 
 
-def responses_bazi_tool_definition() -> dict[str, Any]:
-    definition = bazi_chart_tool_definition()
-    return {
-        "type": "function",
-        "name": definition["name"],
-        "description": definition["description"],
-        "parameters": definition["input_schema"],
-        "strict": True,
-    }
-
-
-def chat_bazi_tool_definition() -> dict[str, Any]:
-    definition = bazi_chart_tool_definition()
-    return {
-        "type": "function",
-        "function": {
-            "name": definition["name"],
-            "description": definition["description"],
-            "parameters": definition["input_schema"],
-        },
-    }
-
-
 def responses_tool_call(payload: dict[str, Any]) -> RequestedToolCall | None:
     output = payload.get("output")
     if not isinstance(output, list):
@@ -136,7 +109,7 @@ def responses_tool_call(payload: dict[str, Any]) -> RequestedToolCall | None:
     if not calls:
         return None
     if len(calls) > 1:
-        raise ToolCallProtocolError("单轮模型响应只能调用一次八字排盘工具。")
+        raise ToolCallProtocolError("单轮模型响应只能调用一次工具。")
     call = calls[0]
     call_id = call.get("call_id")
     name = call.get("name")
@@ -162,7 +135,7 @@ def chat_tool_call(payload: dict[str, Any]) -> RequestedToolCall | None:
     if not isinstance(tool_calls, list) or not tool_calls:
         return None
     if len(tool_calls) > 1:
-        raise ToolCallProtocolError("单轮模型响应只能调用一次八字排盘工具。")
+        raise ToolCallProtocolError("单轮模型响应只能调用一次工具。")
     call = tool_calls[0]
     function = call.get("function") if isinstance(call, dict) else None
     call_id = call.get("id") if isinstance(call, dict) else None
@@ -180,22 +153,6 @@ def chat_tool_call(payload: dict[str, Any]) -> RequestedToolCall | None:
             "tool_calls": tool_calls,
         },
     )
-
-
-def validate_bazi_tool_input(
-    call: RequestedToolCall,
-    expected: BaziChartToolInput,
-) -> BaziChartToolInput:
-    if call.name != BAZI_CHART_TOOL_NAME:
-        raise ToolCallProtocolError(f"模型调用了不允许的工具：{call.name}。")
-    try:
-        raw_arguments = json.loads(call.arguments)
-        actual = BaziChartToolInput.model_validate(raw_arguments)
-    except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
-        raise ToolCallProtocolError("模型生成的排盘工具参数无效。") from exc
-    if actual != expected:
-        raise ToolCallProtocolError("模型擅自修改了排盘工具参数，已拒绝执行。")
-    return actual
 
 
 def _usage(payload: dict[str, Any], protocol: ApiProtocol) -> tuple[int, int]:
@@ -256,11 +213,10 @@ async def run_tool_calling_agent(
     user_prompt: str,
     output_schema_name: str,
     output_schema: dict[str, Any],
-    expected_tool_input: BaziChartToolInput,
-    execute_tool: Callable[[BaziChartToolInput], BaziChartToolResult],
+    tool_registry: AgentToolRegistry,
     client: httpx.AsyncClient,
 ) -> ToolCallingResult:
-    """Run one shared native tool-calling loop and return the final text."""
+    """Run a provider-neutral tool-calling loop over an explicit tool allow-list."""
 
     if api_protocol == "responses":
         endpoint = f"{base_url.rstrip('/')}/responses"
@@ -316,7 +272,7 @@ async def run_tool_calling_agent(
                 "model": model,
                 "instructions": system_prompt,
                 "input": deepcopy(responses_input),
-                "tools": [responses_bazi_tool_definition()],
+                "tools": tool_registry.definitions("responses"),
                 "tool_choice": "auto",
                 "parallel_tool_calls": False,
                 "store": False,
@@ -333,7 +289,7 @@ async def run_tool_calling_agent(
             request_body = {
                 "model": model,
                 "messages": deepcopy(chat_messages),
-                "tools": [chat_bazi_tool_definition()],
+                "tools": tool_registry.definitions("chat_completions"),
                 "tool_choice": "auto",
                 "stream": False,
             }
@@ -431,19 +387,20 @@ async def run_tool_calling_agent(
         )
 
         if requested_call is not None:
-            try:
-                tool_input = validate_bazi_tool_input(requested_call, expected_tool_input)
-            except ToolCallProtocolError as exc:
-                raise run_error(str(exc)) from exc
-
             tool_started = perf_counter()
-            tool_result = execute_tool(tool_input)
+            try:
+                dispatched = tool_registry.dispatch(
+                    requested_call.name,
+                    requested_call.arguments,
+                )
+            except AgentToolError as exc:
+                raise run_error(str(exc)) from exc
             tool_duration_ms = round((perf_counter() - tool_started) * 1000)
-            tool_output = tool_result.model_dump(mode="json")
+            tool_output = dispatched.output
             tool_executions.append(
                 ToolCallingToolExecution(
-                    name=BAZI_CHART_TOOL_NAME,
-                    input=tool_input.model_dump(mode="json"),
+                    name=dispatched.name,
+                    input=dispatched.input,
                     output=tool_output,
                     duration_ms=tool_duration_ms,
                 )
@@ -472,7 +429,7 @@ async def run_tool_calling_agent(
                     {
                         "role": "tool",
                         "tool_call_id": requested_call.call_id,
-                        "name": BAZI_CHART_TOOL_NAME,
+                        "name": dispatched.name,
                         "content": serialized_output,
                     }
                 )

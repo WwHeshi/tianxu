@@ -9,19 +9,19 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic import ValidationError
 
+from .agent_tools import AgentToolRegistry
+from .bazi.fortune import FortuneAtRangeError, select_fortune_at
 from .bazi.tool import (
     BaziChartToolInput,
+    bazi_chart_agent_tool,
     run_bazi_chart_tool,
 )
 from .models import ModelCredential
 from .schemas import (
-    AnnualFortune,
     BaziReport,
-    BigLuckPeriod,
     ChartPreviewResponse,
     Component,
     FortunePillar,
-    MonthlyFortune,
 )
 from .tool_calling_agent import (
     ToolCallingModelCall,
@@ -177,51 +177,6 @@ async def test_model_connection(
         raise ModelProviderError(f"连接测试失败（HTTP {response.status_code}）。")
 
 
-def _select_period(
-    periods: list[BigLuckPeriod], now: datetime
-) -> BigLuckPeriod | None:
-    if not periods:
-        return None
-    return next(
-        (
-            item
-            for item in periods
-            if item.start_solar_datetime <= now < item.end_solar_datetime
-        ),
-        periods[0] if now < periods[0].start_solar_datetime else periods[-1],
-    )
-
-
-def _select_annual(period: BigLuckPeriod, now: datetime) -> AnnualFortune | None:
-    if not period.years:
-        return None
-    return next(
-        (
-            item
-            for item in period.years
-            if item.segment_start_solar_datetime <= now < item.segment_end_solar_datetime
-        ),
-        period.years[0] if now < period.years[0].segment_start_solar_datetime else period.years[-1],
-    )
-
-
-def _select_month(annual: AnnualFortune, now: datetime) -> MonthlyFortune | None:
-    if not annual.months:
-        return None
-    return next(
-        (
-            item
-            for item in annual.months
-            if item.segment_start_solar_datetime <= now < item.segment_end_solar_datetime
-        ),
-        (
-            annual.months[0]
-            if now < annual.months[0].segment_start_solar_datetime
-            else annual.months[-1]
-        ),
-    )
-
-
 YIN_YANG_LABEL = {"yang": "阳", "yin": "阴"}
 BIG_LUCK_DIRECTION_LABEL = {"forward": "顺排", "backward": "逆排"}
 
@@ -260,38 +215,36 @@ def _current_fortune_context(
     if cycles is None:
         return None
 
-    period = _select_period(cycles.big_luck_periods, current_time)
-    annual = _select_annual(period, current_time) if period else None
-    month = _select_month(annual, current_time) if annual else None
+    try:
+        selection = select_fortune_at(cycles, current_time)
+    except FortuneAtRangeError:
+        return None
+    period = selection.big_luck
+    annual = selection.annual
+    month = selection.monthly
 
-    current_big_luck = None
-    if period is not None:
-        current_big_luck = {
-            "phase": "起运前" if period.is_before_start else "行运中",
-            "effective_from": period.start_solar_datetime.isoformat(),
-            "effective_until_exclusive": period.end_solar_datetime.isoformat(),
-            "pillar": _fortune_pillar_context(period.pillar),
-        }
+    current_big_luck = {
+        "phase": "起运前" if period.is_before_start else "行运中",
+        "effective_from": period.start_solar_datetime.isoformat(),
+        "effective_until_exclusive": period.end_solar_datetime.isoformat(),
+        "pillar": _fortune_pillar_context(period.pillar),
+    }
 
-    current_annual = None
-    if annual is not None:
-        current_annual = {
-            "year": annual.year,
-            "nominal_age_sui": annual.nominal_age,
-            "effective_from": annual.segment_start_solar_datetime.isoformat(),
-            "effective_until_exclusive": annual.segment_end_solar_datetime.isoformat(),
-            "pillar": _fortune_pillar_context(annual.pillar),
-        }
+    current_annual = {
+        "year": annual.year,
+        "nominal_age_sui": annual.nominal_age,
+        "effective_from": annual.segment_start_solar_datetime.isoformat(),
+        "effective_until_exclusive": annual.segment_end_solar_datetime.isoformat(),
+        "pillar": _fortune_pillar_context(annual.pillar),
+    }
 
-    current_month = None
-    if month is not None:
-        current_month = {
-            "boundary_solar_term": month.solar_term,
-            "solar_month_started_at": month.start_solar_datetime.isoformat(),
-            "effective_from": month.segment_start_solar_datetime.isoformat(),
-            "effective_until_exclusive": month.segment_end_solar_datetime.isoformat(),
-            "pillar": _fortune_pillar_context(month.pillar),
-        }
+    current_month = {
+        "boundary_solar_term": month.solar_term,
+        "solar_month_started_at": month.start_solar_datetime.isoformat(),
+        "effective_from": month.segment_start_solar_datetime.isoformat(),
+        "effective_until_exclusive": month.segment_end_solar_datetime.isoformat(),
+        "pillar": _fortune_pillar_context(month.pillar),
+    }
 
     return {
         "as_of_beijing_datetime": current_time.isoformat(timespec="seconds"),
@@ -393,8 +346,14 @@ async def generate_structured_report(
                 user_prompt=user_prompt,
                 output_schema_name="bazi_report",
                 output_schema=REPORT_JSON_SCHEMA,
-                expected_tool_input=expected_tool_input,
-                execute_tool=run_bazi_chart_tool,
+                tool_registry=AgentToolRegistry(
+                    [
+                        bazi_chart_agent_tool(
+                            expected_tool_input,
+                            execute_tool=run_bazi_chart_tool,
+                        )
+                    ]
+                ),
                 client=client,
             )
         except ToolCallingRunError as exc:
