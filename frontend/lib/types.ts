@@ -155,19 +155,9 @@ export interface EvaluationItemList {
   total: number;
 }
 
-export interface EvaluationTraceStep {
-  id: string;
-  title: string;
-  category: "deterministic" | "context" | "prompt" | "model" | "tool" | "validation";
-  status: "completed" | "failed";
-  detail: string;
-  duration_ms: number | null;
-}
-
 export interface EvaluationItemTrace {
   question_id: string;
   status: EvaluationItem["status"];
-  steps: EvaluationTraceStep[];
   api_protocol: string;
   model: string;
   endpoint: string;
@@ -444,17 +434,7 @@ export interface BaziReport {
   limitations: string;
 }
 
-export interface AgentTraceStep {
-  id: string;
-  title: string;
-  category: "deterministic" | "context" | "prompt" | "model" | "tool" | "validation";
-  status: "completed" | "failed";
-  detail: string;
-  duration_ms: number | null;
-}
-
 export interface AgentDebugTrace {
-  steps: AgentTraceStep[];
   system_prompt: string;
   user_prompt: string;
   request: {

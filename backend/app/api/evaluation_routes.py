@@ -38,7 +38,6 @@ from ..evals.mingli_bench.schemas import (
     EvaluationRunList,
     EvaluationRunSummary,
     EvaluationStartRequest,
-    EvaluationTraceStep,
     StoredEvaluationAgentTrace,
 )
 from ..evals.mingli_bench.worker import evaluation_task_manager
@@ -314,116 +313,9 @@ def _item_trace(item: EvaluationItem, run: EvaluationRun) -> EvaluationItemTrace
         if trace is not None
         else (None, None)
     )
-    prompt_ready = item.prompt_sha256 is not None
-    scored = item.status == "completed"
-    score_detail = (
-        f"模型选择 {item.predicted_answer}，标准答案为 {item.correct_answer}，"
-        f"判定为{'正确' if item.is_correct else '错误'}。"
-        if scored
-        else item.error_message or "模型答案未通过解析和评分。"
-    )
-    steps = [
-        EvaluationTraceStep(
-            id="dataset",
-            title="读取评测题目",
-            category="deterministic",
-            status="completed",
-            detail="读取题面和选项；标准答案未进入 Agent 请求。",
-        ),
-        EvaluationTraceStep(
-            id="prompt",
-            title="组装工具调用任务",
-            category="prompt",
-            status="completed" if prompt_ready else "failed",
-            detail=(
-                "使用自然文本组合出生资料、题目和选项，并完成答案泄漏检查。"
-                if prompt_ready
-                else item.error_message or "评测提示词构造失败。"
-            ),
-        ),
-    ]
-    tool_index = 0
-    for call in model_calls:
-        if call.stage == "action_selection":
-            tool_call_count = call.tool_call_count
-            if tool_call_count == 0 and tool_index < len(tool_executions):
-                tool_call_count = 1  # Compatibility with traces stored before this field existed.
-            call_tool_executions = tool_executions[
-                tool_index : tool_index + tool_call_count
-            ]
-            steps.append(
-                EvaluationTraceStep(
-                    id=f"action_{call.sequence}",
-                    title=f"响应 {call.sequence} · Action",
-                    category="model",
-                    status="completed" if call_tool_executions else "failed",
-                    detail=(
-                        "模型发起工具调用："
-                        + "、".join(item.name for item in call_tool_executions)
-                        + "。"
-                        if call_tool_executions
-                        else item.error_message or "模型生成的工具调用无效。"
-                    ),
-                    duration_ms=call.duration_ms,
-                )
-            )
-            for tool_execution in call_tool_executions:
-                steps.extend(
-                    [
-                        EvaluationTraceStep(
-                            id=f"tool_{tool_execution.sequence}",
-                            title=f"执行工具 {tool_execution.sequence}",
-                            category="tool",
-                            status="completed",
-                            detail=f"后端校验参数后执行 {tool_execution.name}。",
-                            duration_ms=tool_execution.duration_ms,
-                        ),
-                        EvaluationTraceStep(
-                            id=f"observation_{tool_execution.sequence}",
-                            title=f"Observation {tool_execution.sequence}",
-                            category="context",
-                            status="completed",
-                            detail="向下一轮响应返回该工具的确定性结果。",
-                        ),
-                    ]
-                )
-            tool_index += len(call_tool_executions)
-            continue
-        if call.stage == "final_answer":
-            steps.append(
-                EvaluationTraceStep(
-                    id=f"final_{call.sequence}",
-                    title=f"响应 {call.sequence} · Final",
-                    category="model",
-                    status="completed",
-                    detail="模型结束工具调用循环并返回选择题答案。",
-                    duration_ms=call.duration_ms,
-                )
-            )
-            continue
-        steps.append(
-            EvaluationTraceStep(
-                id=f"error_{call.sequence}",
-                title=f"响应 {call.sequence} · 错误",
-                category="model",
-                status="failed",
-                detail=item.error_message or "模型请求失败。",
-                duration_ms=call.duration_ms,
-            )
-        )
-    steps.append(
-        EvaluationTraceStep(
-            id="score",
-            title="解析并评分",
-            category="validation",
-            status="completed" if scored else "failed",
-            detail=score_detail,
-        )
-    )
     return EvaluationItemTraceResponse(
         question_id=item.question_id,
         status=item.status,
-        steps=steps,
         api_protocol=run.api_protocol,
         model=run.model,
         endpoint=(

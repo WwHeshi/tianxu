@@ -1,6 +1,5 @@
 """Versioned HTTP routes."""
 
-from time import perf_counter
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -30,7 +29,6 @@ from ..schemas import (
     AgentModelCallDebug,
     AgentRequestDebug,
     AgentToolExecutionDebug,
-    AgentTraceStep,
     BirthInput,
     ChartPreviewResponse,
     HealthResponse,
@@ -95,112 +93,10 @@ def _report_debug_trace(
     *,
     execution: ReportGenerationResult | ModelOutputFormatError,
     credential: ModelCredential,
-    normalization_duration_ms: int,
-    validation_error: str | None = None,
 ) -> AgentDebugTrace:
     model_calls = _report_model_calls(execution)
     tool_executions = _report_tool_executions(execution)
-    steps = [
-        AgentTraceStep(
-            id="normalize",
-            title="标准化出生资料",
-            category="deterministic",
-            status="completed",
-            detail="后端校验输入并换算真太阳时间，生成排盘工具的确定参数。",
-            duration_ms=normalization_duration_ms,
-        ),
-        AgentTraceStep(
-            id="prompt",
-            title="组装工具调用任务",
-            category="prompt",
-            status="completed",
-            detail="用户提示词只包含报告任务及 gender、true_solar_datetime 工具参数。",
-        ),
-    ]
-    tool_index = 0
-    final_seen = False
-    for call in model_calls:
-        if call.stage == "action_selection":
-            tool_call_count = call.tool_call_count
-            if tool_call_count == 0 and tool_index < len(tool_executions):
-                tool_call_count = 1  # Compatibility with traces stored before this field existed.
-            call_tool_executions = tool_executions[
-                tool_index : tool_index + tool_call_count
-            ]
-            steps.append(
-                AgentTraceStep(
-                    id=f"action_{call.sequence}",
-                    title=f"响应 {call.sequence} · Action",
-                    category="model",
-                    status="completed" if call_tool_executions else "failed",
-                    detail=(
-                        "模型发起工具调用："
-                        + "、".join(item.name for item in call_tool_executions)
-                        + "。"
-                        if call_tool_executions
-                        else validation_error or "模型生成的工具调用无效。"
-                    ),
-                    duration_ms=call.duration_ms,
-                )
-            )
-            for tool_execution in call_tool_executions:
-                steps.extend(
-                    [
-                        AgentTraceStep(
-                            id=f"tool_{tool_execution.sequence}",
-                            title=f"执行工具 {tool_execution.sequence}",
-                            category="tool",
-                            status="completed",
-                            detail=f"后端校验参数后执行 {tool_execution.name}。",
-                            duration_ms=tool_execution.duration_ms,
-                        ),
-                        AgentTraceStep(
-                            id=f"observation_{tool_execution.sequence}",
-                            title=f"Observation {tool_execution.sequence}",
-                            category="context",
-                            status="completed",
-                            detail="向下一轮模型响应返回该工具的确定性结果。",
-                        ),
-                    ]
-                )
-            tool_index += len(call_tool_executions)
-            continue
-
-        final_seen = True
-        steps.extend(
-            [
-                AgentTraceStep(
-                    id=f"final_{call.sequence}",
-                    title=f"响应 {call.sequence} · Final",
-                    category="model",
-                    status="completed",
-                    detail="模型结束工具调用循环并返回固定八章节报告。",
-                    duration_ms=call.duration_ms,
-                ),
-                AgentTraceStep(
-                    id="validation",
-                    title="校验报告结构",
-                    category="validation",
-                    status="failed" if validation_error else "completed",
-                    detail=(
-                        validation_error
-                        or "使用 Pydantic 校验八个固定章节，拒绝缺失或额外字段。"
-                    ),
-                ),
-            ]
-        )
-    if validation_error and not final_seen and tool_index == len(tool_executions):
-        steps.append(
-            AgentTraceStep(
-                id="guard",
-                title="终止工具调用循环",
-                category="validation",
-                status="failed",
-                detail=validation_error,
-            )
-        )
     return AgentDebugTrace(
-        steps=steps,
         system_prompt=execution.system_prompt,
         user_prompt=execution.user_prompt,
         request=AgentRequestDebug(
@@ -408,12 +304,10 @@ async def generate_report(
     repository: CredentialRepositoryDependency,
     user: ReadyUserDependency,
 ) -> ReportGenerationResponse:
-    chart_started = perf_counter()
     try:
         chart = calculate_chart(payload)
     except ChartCalculationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    chart_duration_ms = round((perf_counter() - chart_started) * 1000)
 
     credential = await repository.get()
     if credential is None:
@@ -437,8 +331,6 @@ async def generate_report(
         debug_trace = _report_debug_trace(
             execution=exc,
             credential=credential,
-            normalization_duration_ms=chart_duration_ms,
-            validation_error=str(exc),
         )
         raise HTTPException(
             status_code=502,
@@ -461,7 +353,6 @@ async def generate_report(
         debug_trace=_report_debug_trace(
             execution=execution,
             credential=credential,
-            normalization_duration_ms=chart_duration_ms,
         )
         if user.role == "admin"
         else None,

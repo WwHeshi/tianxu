@@ -1166,14 +1166,12 @@ function AgentDebugModal({
 
   return (
     <SharedAgentDebugModal
+      apiProtocol={trace.request.api_protocol}
       protocolLabel={protocolLabel}
       model={trace.request.model}
       modelCallCount={trace.request.request_count}
       toolExecutionCount={trace.tool_executions.length}
       endpoint={trace.request.endpoint}
-      steps={trace.steps}
-      systemPrompt={trace.system_prompt}
-      userPrompt={trace.user_prompt}
       modelCalls={trace.model_calls}
       redacted={trace.redacted}
       onClose={onClose}

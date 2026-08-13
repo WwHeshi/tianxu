@@ -361,15 +361,6 @@ class ReportMetadata(BaseModel):
     engine_version: str
 
 
-class AgentTraceStep(BaseModel):
-    id: str
-    title: str
-    category: Literal["deterministic", "context", "prompt", "model", "tool", "validation"]
-    status: Literal["completed", "failed"]
-    detail: str
-    duration_ms: int | None = None
-
-
 class AgentRequestDebug(BaseModel):
     method: Literal["POST"]
     endpoint: str
@@ -398,7 +389,6 @@ class AgentToolExecutionDebug(BaseModel):
 
 
 class AgentDebugTrace(BaseModel):
-    steps: list[AgentTraceStep]
     system_prompt: str
     user_prompt: str
     request: AgentRequestDebug

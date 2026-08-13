@@ -519,16 +519,7 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
         "final_answer",
     ]
     assert len(trace.json()["tool_executions"]) == 1
-    assert [step["title"] for step in trace.json()["steps"]] == [
-        "读取评测题目",
-        "组装工具调用任务",
-        "响应 1 · Action",
-        "执行工具 1",
-        "Observation 1",
-        "响应 2 · Final",
-        "解析并评分",
-    ]
-    assert all(step["status"] == "completed" for step in trace.json()["steps"])
+    assert "steps" not in trace.json()
     second_request = trace.json()["model_calls"][1]["request_body"]
     assert [value["type"] for value in second_request["input"][-2:]] == [
         "function_call",

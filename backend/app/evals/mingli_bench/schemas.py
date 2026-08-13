@@ -106,15 +106,6 @@ class EvaluationItemList(BaseModel):
     total: int
 
 
-class EvaluationTraceStep(BaseModel):
-    id: str
-    title: str
-    category: Literal["deterministic", "context", "prompt", "model", "tool", "validation"]
-    status: Literal["completed", "failed"]
-    detail: str
-    duration_ms: int | None = None
-
-
 class EvaluationModelCallTrace(BaseModel):
     sequence: int = Field(ge=1)
     stage: str
@@ -149,7 +140,6 @@ class StoredEvaluationAgentTrace(BaseModel):
 class EvaluationItemTraceResponse(BaseModel):
     question_id: str
     status: str
-    steps: list[EvaluationTraceStep]
     api_protocol: str
     model: str
     endpoint: str

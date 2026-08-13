@@ -261,15 +261,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     assert data["metadata"]["api_protocol"] == "responses"
     assert data["metadata"]["prompt_version"] == "bazi-report-v19-fortune-tool"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
-    assert [step["id"] for step in data["debug_trace"]["steps"]] == [
-        "normalize",
-        "prompt",
-        "action_1",
-        "tool_1",
-        "observation_1",
-        "final_2",
-        "validation",
-    ]
+    assert "steps" not in data["debug_trace"]
     assert data["debug_trace"]["request"]["request_count"] == 2
     assert data["debug_trace"]["tool_executions"][0]["name"] == "calculate_bazi_chart"
     assert data["debug_trace"]["system_prompt"] == "system prompt"
@@ -325,8 +317,7 @@ async def test_report_format_error_returns_failed_debug_trace(
     detail = response.json()["detail"]
     assert detail["message"] == "模型返回的报告结构不符合约定，请重试。"
     trace = detail["debug_trace"]
-    assert trace["steps"][-1]["id"] == "validation"
-    assert trace["steps"][-1]["status"] == "failed"
+    assert "steps" not in trace
     assert trace["raw_response"] == {"output": [{"text": "invalid report"}]}
     assert "sk-test-super-secret-6789" not in response.text
 
@@ -378,23 +369,12 @@ def test_agent_debug_trace_uses_actual_react_response_count() -> None:
     trace = routes._report_debug_trace(
         execution=execution,
         credential=credential,
-        normalization_duration_ms=2,
     )
 
     assert trace.request.request_count == 2
     assert len(trace.model_calls) == 2
     assert len(trace.tool_executions) == 2
-    assert [step.id for step in trace.steps] == [
-        "normalize",
-        "prompt",
-        "action_1",
-        "tool_1",
-        "observation_1",
-        "tool_2",
-        "observation_2",
-        "final_2",
-        "validation",
-    ]
+    assert not hasattr(trace, "steps")
 
 
 @pytest.mark.asyncio

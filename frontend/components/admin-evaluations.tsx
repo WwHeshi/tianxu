@@ -75,29 +75,6 @@ function scopeLabel(run: EvaluationRunSummary): string {
   return "完整评测 · 160题";
 }
 
-function formatUserPrompt(prompt: string): string {
-  const jsonStart = prompt.indexOf("\n");
-  if (jsonStart === -1) return prompt;
-
-  const heading = prompt.slice(0, jsonStart);
-  const payload = prompt.slice(jsonStart + 1).trim();
-  try {
-    return `${heading}\n${JSON.stringify(JSON.parse(payload), null, 2)}`;
-  } catch {
-    return prompt;
-  }
-}
-
-function evaluationPrompts(trace: EvaluationItemTrace): {
-  systemPrompt: string | null;
-  userPrompt: string | null;
-} {
-  return {
-    systemPrompt: trace.system_prompt,
-    userPrompt: trace.user_prompt ? formatUserPrompt(trace.user_prompt) : null,
-  };
-}
-
 export function AdminEvaluations() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [overview, setOverview] = useState<EvaluationOverview | null>(null);
@@ -519,18 +496,14 @@ function EvaluationTraceModal({
     : trace.api_protocol === "chat_completions"
       ? "OpenAI Chat Completions"
       : "—";
-  const { systemPrompt, userPrompt } = evaluationPrompts(trace);
-
   return (
     <AgentDebugModal
+      apiProtocol={trace.api_protocol}
       protocolLabel={protocolLabel}
       model={trace.model}
       modelCallCount={trace.model_calls.length}
       toolExecutionCount={trace.tool_executions.length}
       endpoint={trace.endpoint}
-      steps={trace.steps}
-      systemPrompt={systemPrompt}
-      userPrompt={userPrompt}
       modelCalls={trace.model_calls}
       redacted={trace.redacted}
       footerPrefix={`题目：${trace.question_id} · Prompt SHA-256：${trace.prompt_sha256 ?? "—"}`}
