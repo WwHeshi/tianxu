@@ -93,6 +93,7 @@ def test_fortune_tool_returns_only_one_big_luck_year_and_month() -> None:
         },
         "流年": {
             "年份": 2026,
+            "虚岁": 24,
             "干支": "丙午",
             "天干十神": "比肩",
             "地支本气十神": "劫财",

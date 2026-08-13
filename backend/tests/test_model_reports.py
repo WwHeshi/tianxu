@@ -260,7 +260,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v18-tool-text"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v19-fortune-tool"
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert [step["id"] for step in data["debug_trace"]["steps"]] == [
         "normalize",
@@ -469,13 +469,15 @@ async def test_responses_report_uses_react_tool_loop() -> None:
     assert first_body["tool_choice"] == "auto"
     assert "max_output_tokens" not in first_body
     assert first_body["tools"][0]["name"] == "calculate_bazi_chart"
+    assert first_body["tools"][1]["name"] == "calculate_fortune_at"
     assert "pillars" not in first_body["input"][0]["content"]
     user_content = first_body["input"][0]["content"]
     assert "性别：male" in user_content
     assert "真太阳出生时间：1990-01-01T11:30:33" in user_content
-    assert "当前大运：" in user_content
-    assert "当前流年：" in user_content
-    assert "当前流月：" in user_content
+    assert "报告基准时间（北京时间）：" in user_content
+    assert "当前大运：" not in user_content
+    assert "当前流年：" not in user_content
+    assert "当前流月：" not in user_content
     assert "{" not in user_content
     assert "}" not in user_content
     assert "calculate_bazi_chart" not in user_content
@@ -491,6 +493,81 @@ async def test_responses_report_uses_react_tool_loop() -> None:
         "gender": "male",
         "true_solar_datetime": "1990-01-01T11:30:33",
     }
+
+
+@pytest.mark.asyncio
+async def test_report_agent_calls_fortune_tool_for_prompt_baseline() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            user_content = json.loads(request.content)["input"][0]["content"]
+            report_time = user_content.split("报告基准时间（北京时间）：", 1)[1]
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_fortune_1",
+                            "name": "calculate_fortune_at",
+                            "arguments": json.dumps(
+                                {
+                                    "gender": "male",
+                                    "true_solar_datetime": "1990-01-01T11:30:33",
+                                    "as_of_datetime": report_time,
+                                }
+                            ),
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": sample_report().model_dump_json()}
+                        ],
+                    }
+                ]
+            },
+        )
+
+    execution = await generate_structured_report(
+        chart=chart,
+        credential=credential,
+        api_key="sk-test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert len(requests) == 2
+    assert execution.tool_executions[0].name == "calculate_fortune_at"
+    assert execution.tool_executions[0].input["gender"] == "male"
+    assert execution.tool_executions[0].input["true_solar_datetime"] == (
+        "1990-01-01T11:30:33"
+    )
+    assert set(execution.tool_executions[0].output) == {"大运", "流年", "流月"}
+    assert "虚岁" in execution.tool_executions[0].output["流年"]
+    second_body = json.loads(requests[1].content)
+    observation = json.loads(second_body["input"][-1]["output"])
+    assert observation == execution.tool_executions[0].output
 
 
 @pytest.mark.asyncio
@@ -543,9 +620,11 @@ async def test_tool_calling_agent_accepts_direct_final_without_tool_call() -> No
     request_body = json.loads(requests[0].content)
     assert request_body["tool_choice"] == "auto"
     assert "标准化出生资料" in request_body["input"][0]["content"]
-    assert "当前大运：" in request_body["input"][0]["content"]
-    assert "当前流年：" in request_body["input"][0]["content"]
-    assert "当前流月：" in request_body["input"][0]["content"]
+    assert "报告基准时间（北京时间）：" in request_body["input"][0]["content"]
+    assert "当前大运：" not in request_body["input"][0]["content"]
+    assert "当前流年：" not in request_body["input"][0]["content"]
+    assert "当前流月：" not in request_body["input"][0]["content"]
+    assert request_body["tools"][1]["name"] == "calculate_fortune_at"
     assert "calculate_bazi_chart" not in request_body["input"][0]["content"]
     assert "{" not in request_body["input"][0]["content"]
 

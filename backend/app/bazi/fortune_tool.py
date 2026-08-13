@@ -57,6 +57,7 @@ class FortuneAtToolAnnual(BaseModel):
     model_config = ConfigDict(extra="forbid", serialize_by_alias=True)
 
     year: int = Field(serialization_alias="年份")
+    nominal_age_sui: int = Field(serialization_alias="虚岁")
     gan_zhi: str = Field(serialization_alias="干支")
     heavenly_stem_ten_god: str | None = Field(serialization_alias="天干十神")
     earthly_branch_main_qi_ten_god: str | None = Field(
@@ -111,6 +112,7 @@ def _tool_result(selection: FortuneAtSelection) -> FortuneAtToolResult:
         ),
         annual=FortuneAtToolAnnual(
             year=annual.year,
+            nominal_age_sui=annual.nominal_age,
             gan_zhi=annual.pillar.gan_zhi,
             heavenly_stem_ten_god=annual.pillar.heavenly_stem.ten_god,
             earthly_branch_main_qi_ten_god=annual.pillar.earthly_branch.ten_god,

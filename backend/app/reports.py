@@ -10,7 +10,7 @@ import httpx
 from pydantic import ValidationError
 
 from .agent_tools import AgentToolRegistry
-from .bazi.fortune import FortuneAtRangeError, select_fortune_at
+from .bazi.fortune_tool import fortune_at_agent_tool
 from .bazi.tool import (
     BaziChartToolInput,
     bazi_chart_agent_tool,
@@ -20,8 +20,6 @@ from .models import ModelCredential
 from .schemas import (
     BaziReport,
     ChartPreviewResponse,
-    Component,
-    FortunePillar,
 )
 from .tool_calling_agent import (
     ToolCallingModelCall,
@@ -30,7 +28,7 @@ from .tool_calling_agent import (
     run_tool_calling_agent,
 )
 
-PROMPT_VERSION = "bazi-report-v18-tool-text"
+PROMPT_VERSION = "bazi-report-v19-fortune-tool"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0
@@ -46,13 +44,14 @@ REPORT_INSTRUCTIONS = """你是八字命盘报告 Agent。
 调用 calculate_bazi_chart 后，必须以返回结果为权威命盘事实，不得重新排盘、改写或质疑四柱。
 
 必须遵守：
-1. 调用工具时，参数必须逐字采用用户提示词给出的 gender 与 true_solar_datetime，
-   不得自行换算时间或添加地点。
+1. 调用工具时，gender、true_solar_datetime 与 as_of_datetime 必须逐字采用用户提示词中
+   对应的性别、真太阳出生时间与报告基准时间，不得自行换算时间或添加地点。
 2. 当前版本没有知识库。不得声称依据某本古籍，不得虚构原文、书名、作者或引文。
 3. 使用审慎、概率性的中文表述，把内容明确定位为传统文化视角下的参考，不把推断写成事实。
 4. 不作疾病诊断、寿命判断、灾祸断言，不给出确定性的法律、投资或医疗建议。
 5. 每一节应具体对应输入命盘，避免空泛套话；若数据不足，应直接说明局限。
-6. 当前运势只讨论输入给出的当前大运、流年、流月，不推测未提供的完整时间线。
+6. 分析当前运势前必须调用 calculate_fortune_at，并以返回的大运、流年和流月为权威事实；
+   不得自行推算或扩展完整时间线。
 7. 神煞仅作辅助参考，不得依据单一神煞作吉凶断言。
 8. 明确区分输入中的确定性事实与基于事实的传统解释，不得声称引擎已经计算输入未提供的结论。
 9. 不得在最终回答中展示内部推理或工具调用过程。
@@ -67,7 +66,7 @@ JSON 对象必须且只能包含以下 8 个字段；所有字段均为非空字
 - career：事业方向、工作特点与发展倾向。
 - finance：财运特点与风险倾向。
 - relationships：婚恋、人际关系与相处倾向。
-- current_fortune：结合输入提供的当前大运、流年和流月分析当前阶段。
+- current_fortune：结合 calculate_fortune_at 返回的大运、流年和流月分析当前阶段。
 - recommendations：给出克制、具体、可执行的建议。
 - limitations：说明本次分析的数据边界、不确定性与传统文化参考属性。
 所有结论只能依据用户资料与工具结果；资料不足时应明确说明，不得虚构命盘数据。
@@ -177,121 +176,15 @@ async def test_model_connection(
         raise ModelProviderError(f"连接测试失败（HTTP {response.status_code}）。")
 
 
-YIN_YANG_LABEL = {"yang": "阳", "yin": "阴"}
-BIG_LUCK_DIRECTION_LABEL = {"forward": "顺排", "backward": "逆排"}
-
-
-def _component_context(component: Component) -> dict[str, Any]:
-    return {
-        "symbol": component.symbol,
-        "element": component.element,
-        "yin_yang": YIN_YANG_LABEL[component.polarity],
-        "ten_god": component.ten_god,
-    }
-
-
-def _fortune_pillar_context(pillar: FortunePillar | None) -> dict[str, Any] | None:
-    if pillar is None:
-        return None
-    branch = pillar.earthly_branch
-    return {
-        "gan_zhi": pillar.gan_zhi,
-        "heavenly_stem": _component_context(pillar.heavenly_stem),
-        "earthly_branch": {
-            "symbol": branch.symbol,
-            "primary_element": branch.element,
-            "yin_yang": YIN_YANG_LABEL[branch.polarity],
-            "main_qi_ten_god": branch.ten_god,
-        },
-    }
-
-
-def _current_fortune_context(
-    *,
-    chart: ChartPreviewResponse,
-    current_time: datetime,
-) -> dict[str, Any] | None:
-    cycles = chart.chart.fortune_cycles
-    if cycles is None:
-        return None
-
-    try:
-        selection = select_fortune_at(cycles, current_time)
-    except FortuneAtRangeError:
-        return None
-    period = selection.big_luck
-    annual = selection.annual
-    month = selection.monthly
-
-    current_big_luck = {
-        "phase": "起运前" if period.is_before_start else "行运中",
-        "effective_from": period.start_solar_datetime.isoformat(),
-        "effective_until_exclusive": period.end_solar_datetime.isoformat(),
-        "pillar": _fortune_pillar_context(period.pillar),
-    }
-
-    current_annual = {
-        "year": annual.year,
-        "nominal_age_sui": annual.nominal_age,
-        "effective_from": annual.segment_start_solar_datetime.isoformat(),
-        "effective_until_exclusive": annual.segment_end_solar_datetime.isoformat(),
-        "pillar": _fortune_pillar_context(annual.pillar),
-    }
-
-    current_month = {
-        "boundary_solar_term": month.solar_term,
-        "solar_month_started_at": month.start_solar_datetime.isoformat(),
-        "effective_from": month.segment_start_solar_datetime.isoformat(),
-        "effective_until_exclusive": month.segment_end_solar_datetime.isoformat(),
-        "pillar": _fortune_pillar_context(month.pillar),
-    }
-
-    return {
-        "as_of_beijing_datetime": current_time.isoformat(timespec="seconds"),
-        "big_luck_sequence_direction": BIG_LUCK_DIRECTION_LABEL[cycles.direction],
-        "first_big_luck_start_datetime": cycles.start_solar_datetime.isoformat(),
-        "current_big_luck": current_big_luck,
-        "current_annual": current_annual,
-        "current_month": current_month,
-    }
-
-
-def _current_fortune_prompt(context: dict[str, Any] | None) -> str:
-    if context is None:
-        return "当前大运：未提供\n当前流年：未提供\n当前流月：未提供"
-
-    def fortune_line(label: str, item: dict[str, Any] | None) -> str:
-        if item is None or item.get("pillar") is None:
-            return f"{label}：未提供"
-        pillar = item["pillar"]["gan_zhi"]
-        effective_from = item["effective_from"]
-        effective_until = item["effective_until_exclusive"]
-        return f"{label}：{pillar}（{effective_from} 至 {effective_until}，结束时间不含）"
-
-    annual = context.get("current_annual")
-    month = context.get("current_month")
-    lines = [
-        f"当前运势基准时间：{context['as_of_beijing_datetime']}",
-        fortune_line("当前大运", context.get("current_big_luck")),
-        fortune_line("当前流年", annual),
-        fortune_line("当前流月", month),
-    ]
-    if annual is not None:
-        lines[2] += f"，公历年份 {annual['year']}，虚岁 {annual['nominal_age_sui']}"
-    if month is not None:
-        lines[3] += f"，月界节气 {month['boundary_solar_term']}"
-    return "\n".join(lines)
-
-
 def _report_user_prompt(
     tool_input: BaziChartToolInput,
-    current_fortune: dict[str, Any] | None,
+    report_time: datetime,
 ) -> str:
     return (
         "请根据以下标准化出生资料，生成一份固定八章节的八字分析报告：\n"
         f"性别：{tool_input.gender.value}\n"
         f"真太阳出生时间：{tool_input.true_solar_datetime.isoformat(timespec='seconds')}\n"
-        f"{_current_fortune_prompt(current_fortune)}"
+        f"报告基准时间（北京时间）：{report_time.isoformat(timespec='seconds')}"
     )
 
 
@@ -322,11 +215,7 @@ async def generate_structured_report(
         true_solar_datetime=chart.normalized_input.true_solar_datetime,
     )
     report_now = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
-    current_fortune = _current_fortune_context(
-        chart=chart,
-        current_time=report_now,
-    )
-    user_prompt = _report_user_prompt(expected_tool_input, current_fortune)
+    user_prompt = _report_user_prompt(expected_tool_input, report_now)
     if credential.api_protocol == "responses":
         system_prompt = REPORT_INSTRUCTIONS
     elif credential.api_protocol == "chat_completions":
@@ -351,7 +240,8 @@ async def generate_structured_report(
                         bazi_chart_agent_tool(
                             expected_tool_input,
                             execute_tool=run_bazi_chart_tool,
-                        )
+                        ),
+                        fortune_at_agent_tool(),
                     ]
                 ),
                 client=client,
