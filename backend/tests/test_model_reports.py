@@ -26,7 +26,6 @@ from app.reports import (
 )
 from app.schemas import BaziReport, BirthInput
 from app.security import SecretCipher, SecretEncryptionError
-from app.tool_calling_agent import MAX_TOOL_CALLING_MODEL_CALLS
 
 MASTER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
@@ -361,9 +360,14 @@ def test_agent_debug_trace_uses_actual_react_response_count() -> None:
         raw_response={"output_text": sample_report().model_dump_json()},
         model_latency_ms=18,
         model_calls=(
-            ReportModelCall("action_selection", {"round": 1}, {"action": 1}, 5),
-            ReportModelCall("action_selection", {"round": 2}, {"action": 2}, 6),
-            ReportModelCall("final_answer", {"round": 3}, {"final": True}, 7),
+            ReportModelCall(
+                "action_selection",
+                {"round": 1},
+                {"action": 1},
+                5,
+                tool_call_count=2,
+            ),
+            ReportModelCall("final_answer", {"round": 2}, {"final": True}, 7),
         ),
         tool_executions=(
             ReportToolExecution("calculate_bazi_chart", {"round": 1}, {"chart": 1}, 1),
@@ -377,8 +381,8 @@ def test_agent_debug_trace_uses_actual_react_response_count() -> None:
         normalization_duration_ms=2,
     )
 
-    assert trace.request.request_count == 3
-    assert len(trace.model_calls) == 3
+    assert trace.request.request_count == 2
+    assert len(trace.model_calls) == 2
     assert len(trace.tool_executions) == 2
     assert [step.id for step in trace.steps] == [
         "normalize",
@@ -386,10 +390,9 @@ def test_agent_debug_trace_uses_actual_react_response_count() -> None:
         "action_1",
         "tool_1",
         "observation_1",
-        "action_2",
         "tool_2",
         "observation_2",
-        "final_3",
+        "final_2",
         "validation",
     ]
 
@@ -571,6 +574,94 @@ async def test_report_agent_calls_fortune_tool_for_prompt_baseline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_report_agent_accepts_multiple_tool_calls_in_one_response() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_chart_parallel",
+                            "name": "calculate_bazi_chart",
+                            "arguments": json.dumps(
+                                {
+                                    "gender": "male",
+                                    "true_solar_datetime": "1990-01-01T11:30:33",
+                                }
+                            ),
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "call_fortune_parallel",
+                            "name": "calculate_fortune_at",
+                            "arguments": json.dumps(
+                                {
+                                    "gender": "male",
+                                    "true_solar_datetime": "1990-01-01T11:30:33",
+                                    "as_of_datetime": "2026-08-14T12:00:00",
+                                }
+                            ),
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": sample_report().model_dump_json()}
+                        ],
+                    }
+                ]
+            },
+        )
+
+    execution = await generate_structured_report(
+        chart=chart,
+        credential=credential,
+        api_key="sk-test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert len(requests) == 2
+    assert json.loads(requests[0].content)["parallel_tool_calls"] is True
+    assert execution.model_calls[0].tool_call_count == 2
+    assert [item.name for item in execution.tool_executions] == [
+        "calculate_bazi_chart",
+        "calculate_fortune_at",
+    ]
+    second_input = json.loads(requests[1].content)["input"]
+    observations = [
+        item for item in second_input if item.get("type") == "function_call_output"
+    ]
+    assert [item["call_id"] for item in observations] == [
+        "call_chart_parallel",
+        "call_fortune_parallel",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_calling_agent_accepts_direct_final_without_tool_call() -> None:
     chart = calculate_chart(BirthInput.model_validate(valid_payload()))
     credential = ModelCredential(
@@ -700,7 +791,7 @@ async def test_react_loop_tracks_each_model_response_dynamically() -> None:
 
 
 @pytest.mark.asyncio
-async def test_react_loop_stops_after_safety_limit() -> None:
+async def test_react_loop_continues_beyond_the_previous_response_limit() -> None:
     chart = calculate_chart(BirthInput.model_validate(valid_payload()))
     credential = ModelCredential(
         id=1,
@@ -719,36 +810,50 @@ async def test_react_loop_stops_after_safety_limit() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         nonlocal request_count
         request_count += 1
+        if request_count <= 12:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": f"call_chart_loop_{request_count}",
+                            "name": "calculate_bazi_chart",
+                            "arguments": json.dumps(
+                                {
+                                    "gender": "male",
+                                    "true_solar_datetime": "1990-01-01T11:30:33",
+                                }
+                            ),
+                        }
+                    ]
+                },
+            )
         return httpx.Response(
             200,
             json={
                 "output": [
                     {
-                        "type": "function_call",
-                        "call_id": f"call_chart_loop_{request_count}",
-                        "name": "calculate_bazi_chart",
-                        "arguments": json.dumps(
-                            {
-                                "gender": "male",
-                                "true_solar_datetime": "1990-01-01T11:30:33",
-                            }
-                        ),
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": sample_report().model_dump_json()}
+                        ],
                     }
                 ]
             },
         )
 
-    with pytest.raises(ModelOutputFormatError, match="安全终止") as captured:
-        await generate_structured_report(
-            chart=chart,
-            credential=credential,
-            api_key="sk-test",
-            transport=httpx.MockTransport(handler),
-        )
+    execution = await generate_structured_report(
+        chart=chart,
+        credential=credential,
+        api_key="sk-test",
+        transport=httpx.MockTransport(handler),
+    )
 
-    assert request_count == MAX_TOOL_CALLING_MODEL_CALLS
-    assert len(captured.value.model_calls) == MAX_TOOL_CALLING_MODEL_CALLS
-    assert len(captured.value.tool_executions) == MAX_TOOL_CALLING_MODEL_CALLS
+    assert request_count == 13
+    assert len(execution.model_calls) == 13
+    assert len(execution.tool_executions) == 12
+    assert execution.model_calls[-1].stage == "final_answer"
 
 
 @pytest.mark.asyncio
@@ -906,7 +1011,25 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
                                                 }
                                             ),
                                         },
-                                    }
+                                    },
+                                    {
+                                        "id": "call_fortune_chat_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "calculate_fortune_at",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "gender": "male",
+                                                    "true_solar_datetime": (
+                                                        "1990-01-01T11:30:33"
+                                                    ),
+                                                    "as_of_datetime": (
+                                                        "2026-08-14T12:00:00"
+                                                    ),
+                                                }
+                                            ),
+                                        },
+                                    },
                                 ],
                             }
                         }
@@ -941,6 +1064,7 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     first_body = json.loads(requests[0].content)
     second_body = json.loads(requests[1].content)
     assert first_body["tool_choice"] == "auto"
+    assert first_body["parallel_tool_calls"] is True
     assert "max_tokens" not in first_body
     assert first_body["tools"][0]["function"]["name"] == "calculate_bazi_chart"
     assert "必须且只能包含以下 8 个字段" in first_body["messages"][0]["content"]
@@ -948,8 +1072,21 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     assert "不要输出 Markdown 代码块" in first_body["messages"][0]["content"]
     assert "神煞仅作辅助参考" in first_body["messages"][0]["content"]
     assert second_body["tool_choice"] == "auto"
-    assert second_body["messages"][-1]["role"] == "tool"
-    assert "big_luck_periods" not in second_body["messages"][-1]["content"]
+    assert [item["role"] for item in second_body["messages"][-3:]] == [
+        "assistant",
+        "tool",
+        "tool",
+    ]
+    assert [item["tool_call_id"] for item in second_body["messages"][-2:]] == [
+        "call_chart_chat_1",
+        "call_fortune_chat_1",
+    ]
+    assert all(
+        "big_luck_periods" not in item["content"]
+        for item in second_body["messages"][-2:]
+    )
+    assert execution.model_calls[0].tool_call_count == 2
+    assert len(execution.tool_executions) == 2
 
 
 @pytest.mark.asyncio

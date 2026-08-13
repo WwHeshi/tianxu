@@ -92,41 +92,10 @@ function evaluationPrompts(trace: EvaluationItemTrace): {
   systemPrompt: string | null;
   userPrompt: string | null;
 } {
-  if (trace.system_prompt || trace.user_prompt) {
-    return {
-      systemPrompt: trace.system_prompt,
-      userPrompt: trace.user_prompt,
-    };
-  }
-  const body = trace.request?.body;
-  if (!body) return { systemPrompt: null, userPrompt: null };
-
-  if (trace.request?.api_protocol === "responses") {
-    return {
-      systemPrompt: typeof body.instructions === "string" ? body.instructions : null,
-      userPrompt: typeof body.input === "string" ? formatUserPrompt(body.input) : null,
-    };
-  }
-
-  if (trace.request?.api_protocol === "chat_completions" && Array.isArray(body.messages)) {
-    const messages = body.messages.filter(
-      (message): message is Record<string, unknown> =>
-        typeof message === "object" && message !== null,
-    );
-    const contentForRole = (role: "system" | "user") => {
-      const contents = messages
-        .filter((message) => message.role === role && typeof message.content === "string")
-        .map((message) => message.content as string);
-      return contents.length > 0 ? contents.join("\n\n") : null;
-    };
-    const userPrompt = contentForRole("user");
-    return {
-      systemPrompt: contentForRole("system"),
-      userPrompt: userPrompt ? formatUserPrompt(userPrompt) : null,
-    };
-  }
-
-  return { systemPrompt: null, userPrompt: null };
+  return {
+    systemPrompt: trace.system_prompt,
+    userPrompt: trace.user_prompt ? formatUserPrompt(trace.user_prompt) : null,
+  };
 }
 
 export function AdminEvaluations() {
@@ -545,9 +514,9 @@ function EvaluationTraceModal({
   trace: EvaluationItemTrace;
   onClose: () => void;
 }) {
-  const protocolLabel = trace.request?.api_protocol === "responses"
+  const protocolLabel = trace.api_protocol === "responses"
     ? "OpenAI Responses"
-    : trace.request?.api_protocol === "chat_completions"
+    : trace.api_protocol === "chat_completions"
       ? "OpenAI Chat Completions"
       : "—";
   const { systemPrompt, userPrompt } = evaluationPrompts(trace);
@@ -555,10 +524,10 @@ function EvaluationTraceModal({
   return (
     <AgentDebugModal
       protocolLabel={protocolLabel}
-      model={trace.request?.model ?? "—"}
+      model={trace.model}
       modelCallCount={trace.model_calls.length}
       toolExecutionCount={trace.tool_executions.length}
-      endpoint={trace.request?.endpoint ?? "—"}
+      endpoint={trace.endpoint}
       steps={trace.steps}
       systemPrompt={systemPrompt}
       userPrompt={userPrompt}

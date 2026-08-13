@@ -16,7 +16,6 @@ from .agent_tools import (
 )
 
 ApiProtocol = Literal["responses", "chat_completions"]
-MAX_TOOL_CALLING_MODEL_CALLS = 10
 
 
 class ToolCallProtocolError(RuntimeError):
@@ -38,6 +37,7 @@ class ToolCallingModelCall:
     raw_response: dict[str, Any]
     latency_ms: int
     status_code: int | None = None
+    tool_call_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -97,62 +97,67 @@ class ToolCallingRunError(RuntimeError):
         self.fatal = fatal
 
 
-def responses_tool_call(payload: dict[str, Any]) -> RequestedToolCall | None:
+def responses_tool_calls(payload: dict[str, Any]) -> tuple[RequestedToolCall, ...]:
     output = payload.get("output")
     if not isinstance(output, list):
-        return None
+        return ()
     calls = [
         item
         for item in output
         if isinstance(item, dict) and item.get("type") == "function_call"
     ]
     if not calls:
-        return None
-    if len(calls) > 1:
-        raise ToolCallProtocolError("单轮模型响应只能调用一次工具。")
-    call = calls[0]
-    call_id = call.get("call_id")
-    name = call.get("name")
-    arguments = call.get("arguments")
-    if not all(isinstance(value, str) and value for value in (call_id, name, arguments)):
-        raise ToolCallProtocolError("模型返回的工具调用结构不完整。")
-    return RequestedToolCall(
-        call_id=call_id,
-        name=name,
-        arguments=arguments,
-        continuation=call,
-    )
+        return ()
+    requested: list[RequestedToolCall] = []
+    for call in calls:
+        call_id = call.get("call_id")
+        name = call.get("name")
+        arguments = call.get("arguments")
+        if not all(isinstance(value, str) and value for value in (call_id, name, arguments)):
+            raise ToolCallProtocolError("模型返回的工具调用结构不完整。")
+        requested.append(
+            RequestedToolCall(
+                call_id=call_id,
+                name=name,
+                arguments=arguments,
+                continuation=call,
+            )
+        )
+    return tuple(requested)
 
 
-def chat_tool_call(payload: dict[str, Any]) -> RequestedToolCall | None:
+def chat_tool_calls(payload: dict[str, Any]) -> tuple[RequestedToolCall, ...]:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        return None
+        return ()
     message = choices[0].get("message")
     if not isinstance(message, dict):
-        return None
+        return ()
     tool_calls = message.get("tool_calls")
     if not isinstance(tool_calls, list) or not tool_calls:
-        return None
-    if len(tool_calls) > 1:
-        raise ToolCallProtocolError("单轮模型响应只能调用一次工具。")
-    call = tool_calls[0]
-    function = call.get("function") if isinstance(call, dict) else None
-    call_id = call.get("id") if isinstance(call, dict) else None
-    name = function.get("name") if isinstance(function, dict) else None
-    arguments = function.get("arguments") if isinstance(function, dict) else None
-    if not all(isinstance(value, str) and value for value in (call_id, name, arguments)):
-        raise ToolCallProtocolError("模型返回的工具调用结构不完整。")
-    return RequestedToolCall(
-        call_id=call_id,
-        name=name,
-        arguments=arguments,
-        continuation={
-            "role": "assistant",
-            "content": message.get("content"),
-            "tool_calls": tool_calls,
-        },
-    )
+        return ()
+    continuation = {
+        "role": "assistant",
+        "content": message.get("content"),
+        "tool_calls": tool_calls,
+    }
+    requested = []
+    for call in tool_calls:
+        function = call.get("function") if isinstance(call, dict) else None
+        call_id = call.get("id") if isinstance(call, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        arguments = function.get("arguments") if isinstance(function, dict) else None
+        if not all(isinstance(value, str) and value for value in (call_id, name, arguments)):
+            raise ToolCallProtocolError("模型返回的工具调用结构不完整。")
+        requested.append(
+            RequestedToolCall(
+                call_id=call_id,
+                name=name,
+                arguments=arguments,
+                continuation=continuation,
+            )
+        )
+    return tuple(requested)
 
 
 def _usage(payload: dict[str, Any], protocol: ApiProtocol) -> tuple[int, int]:
@@ -266,7 +271,7 @@ async def run_tool_calling_agent(
             fatal=fatal,
         )
 
-    for _ in range(MAX_TOOL_CALLING_MODEL_CALLS):
+    while True:
         if api_protocol == "responses":
             request_body = {
                 "model": model,
@@ -274,7 +279,7 @@ async def run_tool_calling_agent(
                 "input": deepcopy(responses_input),
                 "tools": tool_registry.definitions("responses"),
                 "tool_choice": "auto",
-                "parallel_tool_calls": False,
+                "parallel_tool_calls": True,
                 "store": False,
                 "text": {
                     "format": {
@@ -291,6 +296,7 @@ async def run_tool_calling_agent(
                 "messages": deepcopy(chat_messages),
                 "tools": tool_registry.definitions("chat_completions"),
                 "tool_choice": "auto",
+                "parallel_tool_calls": True,
                 "stream": False,
             }
         last_request_body = request_body
@@ -358,10 +364,10 @@ async def run_tool_calling_agent(
             )
 
         try:
-            requested_call = (
-                responses_tool_call(payload)
+            requested_calls = (
+                responses_tool_calls(payload)
                 if api_protocol == "responses"
-                else chat_tool_call(payload)
+                else chat_tool_calls(payload)
             )
         except ToolCallProtocolError as exc:
             model_calls.append(
@@ -375,7 +381,7 @@ async def run_tool_calling_agent(
             )
             raise run_error(str(exc)) from exc
 
-        stage = "action_selection" if requested_call is not None else "final_answer"
+        stage = "action_selection" if requested_calls else "final_answer"
         model_calls.append(
             ToolCallingModelCall(
                 stage=stage,
@@ -383,55 +389,63 @@ async def run_tool_calling_agent(
                 raw_response=payload,
                 latency_ms=latency_ms,
                 status_code=status_code,
+                tool_call_count=len(requested_calls),
             )
         )
 
-        if requested_call is not None:
-            tool_started = perf_counter()
-            try:
-                dispatched = tool_registry.dispatch(
-                    requested_call.name,
-                    requested_call.arguments,
+        if requested_calls:
+            dispatched_calls = []
+            for requested_call in requested_calls:
+                tool_started = perf_counter()
+                try:
+                    dispatched = tool_registry.dispatch(
+                        requested_call.name,
+                        requested_call.arguments,
+                    )
+                except AgentToolError as exc:
+                    raise run_error(str(exc)) from exc
+                tool_duration_ms = round((perf_counter() - tool_started) * 1000)
+                tool_executions.append(
+                    ToolCallingToolExecution(
+                        name=dispatched.name,
+                        input=dispatched.input,
+                        output=dispatched.output,
+                        duration_ms=tool_duration_ms,
+                    )
                 )
-            except AgentToolError as exc:
-                raise run_error(str(exc)) from exc
-            tool_duration_ms = round((perf_counter() - tool_started) * 1000)
-            tool_output = dispatched.output
-            tool_executions.append(
-                ToolCallingToolExecution(
-                    name=dispatched.name,
-                    input=dispatched.input,
-                    output=tool_output,
-                    duration_ms=tool_duration_ms,
-                )
-            )
-            serialized_output = json.dumps(
-                tool_output,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
+                dispatched_calls.append((requested_call, dispatched))
 
             if api_protocol == "responses":
                 continuation = payload.get("output")
                 if not isinstance(continuation, list):
-                    continuation = [requested_call.continuation]
+                    continuation = [call.continuation for call in requested_calls]
                 responses_input.extend(deepcopy(continuation))
-                responses_input.append(
+                responses_input.extend(
                     {
                         "type": "function_call_output",
                         "call_id": requested_call.call_id,
-                        "output": serialized_output,
+                        "output": json.dumps(
+                            dispatched.output,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
                     }
+                    for requested_call, dispatched in dispatched_calls
                 )
             else:
-                chat_messages.append(deepcopy(requested_call.continuation))
-                chat_messages.append(
+                chat_messages.append(deepcopy(requested_calls[0].continuation))
+                chat_messages.extend(
                     {
                         "role": "tool",
                         "tool_call_id": requested_call.call_id,
                         "name": dispatched.name,
-                        "content": serialized_output,
+                        "content": json.dumps(
+                            dispatched.output,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
                     }
+                    for requested_call, dispatched in dispatched_calls
                 )
             continue
 
@@ -456,7 +470,3 @@ async def run_tool_calling_agent(
             model_calls=tuple(model_calls),
             tool_executions=tuple(tool_executions),
         )
-
-    raise run_error(
-        f"工具调用循环超过 {MAX_TOOL_CALLING_MODEL_CALLS} 次模型响应，已安全终止。"
-    )

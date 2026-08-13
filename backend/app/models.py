@@ -213,9 +213,7 @@ class EvaluationItem(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     prompt_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    request_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    response_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    agent_trace: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

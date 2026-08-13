@@ -6,6 +6,7 @@ import csv
 import io
 import json
 from collections import defaultdict
+from copy import deepcopy
 from typing import Annotated, Callable
 from uuid import UUID
 
@@ -33,13 +34,12 @@ from ..evals.mingli_bench.schemas import (
     EvaluationModelCallTrace,
     EvaluationOptionResponse,
     EvaluationOverview,
-    EvaluationRequestTrace,
-    EvaluationResponseTrace,
     EvaluationRunDetail,
     EvaluationRunList,
     EvaluationRunSummary,
     EvaluationStartRequest,
     EvaluationTraceStep,
+    StoredEvaluationAgentTrace,
 )
 from ..evals.mingli_bench.worker import evaluation_task_manager
 from ..models import EvaluationItem, EvaluationRun
@@ -149,25 +149,171 @@ def _item_response(item: EvaluationItem, question: EvaluationQuestion) -> Evalua
     )
 
 
-def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
-    request = (
-        EvaluationRequestTrace.model_validate(item.request_snapshot)
-        if item.request_snapshot is not None
+def _next_request_body(
+    current: dict,
+    response: dict,
+    *,
+    api_protocol: str,
+    tool_executions: list,
+) -> dict:
+    next_body = deepcopy(current)
+    if api_protocol == "responses":
+        response_output = response.get("output")
+        continuation = deepcopy(response_output) if isinstance(response_output, list) else []
+        request_input = next_body.setdefault("input", [])
+        request_input.extend(continuation)
+        function_calls = [
+            value
+            for value in continuation
+            if isinstance(value, dict) and value.get("type") == "function_call"
+        ]
+        for call, execution in zip(function_calls, tool_executions, strict=False):
+            request_input.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call.get("call_id"),
+                    "output": json.dumps(
+                        execution.output,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                }
+            )
+        return next_body
+
+    choices = response.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices else {}
+    message = choice.get("message") if isinstance(choice, dict) else {}
+    tool_calls = message.get("tool_calls") if isinstance(message, dict) else []
+    messages = next_body.setdefault("messages", [])
+    messages.append(
+        {
+            "role": "assistant",
+            "content": message.get("content") if isinstance(message, dict) else None,
+            "tool_calls": deepcopy(tool_calls),
+        }
+    )
+    for call, execution in zip(tool_calls, tool_executions, strict=False):
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": call.get("id") if isinstance(call, dict) else None,
+                "name": execution.name,
+                "content": json.dumps(
+                    execution.output,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            }
+        )
+    return next_body
+
+
+def _action_tool_call_count(response: dict, api_protocol: str) -> int:
+    if api_protocol == "responses":
+        output = response.get("output")
+        if not isinstance(output, list):
+            return 0
+        return sum(
+            isinstance(value, dict) and value.get("type") == "function_call"
+            for value in output
+        )
+    choices = response.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices else {}
+    message = choice.get("message") if isinstance(choice, dict) else {}
+    tool_calls = message.get("tool_calls") if isinstance(message, dict) else []
+    return len(tool_calls) if isinstance(tool_calls, list) else 0
+
+
+def _trace_model_calls(
+    trace: StoredEvaluationAgentTrace,
+    *,
+    api_protocol: str,
+) -> list[EvaluationModelCallTrace]:
+    model_calls: list[EvaluationModelCallTrace] = []
+    request_body = deepcopy(trace.initial_request_body)
+    tool_index = 0
+    for stored_call in trace.model_calls:
+        tool_call_count = stored_call.tool_call_count
+        if stored_call.stage == "action_selection" and tool_call_count == 0:
+            tool_call_count = _action_tool_call_count(
+                stored_call.response_body,
+                api_protocol,
+            )
+        model_calls.append(
+            EvaluationModelCallTrace(
+                sequence=stored_call.sequence,
+                stage=stored_call.stage,
+                request_body=deepcopy(request_body),
+                response_body=stored_call.response_body,
+                duration_ms=stored_call.duration_ms,
+                tool_call_count=tool_call_count,
+            )
+        )
+        call_tools = trace.tool_executions[
+            tool_index : tool_index + tool_call_count
+        ]
+        tool_index += len(call_tools)
+        if stored_call.stage == "action_selection":
+            request_body = _next_request_body(
+                request_body,
+                stored_call.response_body,
+                api_protocol=api_protocol,
+                tool_executions=call_tools,
+            )
+    return model_calls
+
+
+def _trace_prompts(initial_request_body: dict, api_protocol: str) -> tuple[str | None, str | None]:
+    if api_protocol == "responses":
+        system_prompt = initial_request_body.get("instructions")
+        request_input = initial_request_body.get("input")
+        user_prompt = None
+        if isinstance(request_input, list):
+            user_prompt = next(
+                (
+                    value.get("content")
+                    for value in request_input
+                    if isinstance(value, dict)
+                    and value.get("role") == "user"
+                    and isinstance(value.get("content"), str)
+                ),
+                None,
+            )
+        return system_prompt if isinstance(system_prompt, str) else None, user_prompt
+
+    messages = initial_request_body.get("messages")
+    if not isinstance(messages, list):
+        return None, None
+
+    def content_for(role: str) -> str | None:
+        contents = [
+            value["content"]
+            for value in messages
+            if isinstance(value, dict)
+            and value.get("role") == role
+            and isinstance(value.get("content"), str)
+        ]
+        return "\n\n".join(contents) if contents else None
+
+    return content_for("system"), content_for("user")
+
+
+def _item_trace(item: EvaluationItem, run: EvaluationRun) -> EvaluationItemTraceResponse:
+    trace = (
+        StoredEvaluationAgentTrace.model_validate(item.agent_trace)
+        if item.agent_trace is not None
         else None
     )
-    model_calls = list(request.model_calls) if request is not None else []
-    if request is not None and not model_calls:
-        model_calls = [
-            EvaluationModelCallTrace(
-                sequence=1,
-                stage="final_answer" if item.response_status_code == 200 else "error",
-                request_body=request.body,
-                response_body=item.raw_response or {},
-                duration_ms=item.latency_ms or 0,
-                status_code=item.response_status_code,
-            )
-        ]
-    tool_executions = list(request.tool_executions) if request is not None else []
+    model_calls = (
+        _trace_model_calls(trace, api_protocol=run.api_protocol) if trace is not None else []
+    )
+    tool_executions = list(trace.tool_executions) if trace is not None else []
+    system_prompt, user_prompt = (
+        _trace_prompts(trace.initial_request_body, run.api_protocol)
+        if trace is not None
+        else (None, None)
+    )
     prompt_ready = item.prompt_sha256 is not None
     scored = item.status == "completed"
     score_detail = (
@@ -199,26 +345,29 @@ def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
     tool_index = 0
     for call in model_calls:
         if call.stage == "action_selection":
-            tool_execution = (
-                tool_executions[tool_index]
-                if tool_index < len(tool_executions)
-                else None
-            )
+            tool_call_count = call.tool_call_count
+            if tool_call_count == 0 and tool_index < len(tool_executions):
+                tool_call_count = 1  # Compatibility with traces stored before this field existed.
+            call_tool_executions = tool_executions[
+                tool_index : tool_index + tool_call_count
+            ]
             steps.append(
                 EvaluationTraceStep(
                     id=f"action_{call.sequence}",
                     title=f"响应 {call.sequence} · Action",
                     category="model",
-                    status="completed" if tool_execution is not None else "failed",
+                    status="completed" if call_tool_executions else "failed",
                     detail=(
-                        "模型发起 calculate_bazi_chart 工具调用。"
-                        if tool_execution is not None
+                        "模型发起工具调用："
+                        + "、".join(item.name for item in call_tool_executions)
+                        + "。"
+                        if call_tool_executions
                         else item.error_message or "模型生成的工具调用无效。"
                     ),
                     duration_ms=call.duration_ms,
                 )
             )
-            if tool_execution is not None:
+            for tool_execution in call_tool_executions:
                 steps.extend(
                     [
                         EvaluationTraceStep(
@@ -226,7 +375,7 @@ def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
                             title=f"执行工具 {tool_execution.sequence}",
                             category="tool",
                             status="completed",
-                            detail="后端校验参数后调用确定性排盘引擎。",
+                            detail=f"后端校验参数后执行 {tool_execution.name}。",
                             duration_ms=tool_execution.duration_ms,
                         ),
                         EvaluationTraceStep(
@@ -234,11 +383,11 @@ def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
                             title=f"Observation {tool_execution.sequence}",
                             category="context",
                             status="completed",
-                            detail="向下一轮响应返回四柱及题目目标年份运势。",
+                            detail="向下一轮响应返回该工具的确定性结果。",
                         ),
                     ]
                 )
-                tool_index += 1
+            tool_index += len(call_tool_executions)
             continue
         if call.stage == "final_answer":
             steps.append(
@@ -275,13 +424,15 @@ def _item_trace(item: EvaluationItem) -> EvaluationItemTraceResponse:
         question_id=item.question_id,
         status=item.status,
         steps=steps,
-        request=request,
-        response=EvaluationResponseTrace(
-            status_code=item.response_status_code,
-            body=item.raw_response,
+        api_protocol=run.api_protocol,
+        model=run.model,
+        endpoint=(
+            f"{run.base_url.rstrip('/')}/responses"
+            if run.api_protocol == "responses"
+            else f"{run.base_url.rstrip('/')}/chat/completions"
         ),
-        system_prompt=request.system_prompt if request is not None else None,
-        user_prompt=request.user_prompt if request is not None else None,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         model_calls=model_calls,
         tool_executions=tool_executions,
         prompt_sha256=item.prompt_sha256,
@@ -485,7 +636,8 @@ async def get_evaluation_item_trace(
     _admin: AdminUserDependency,
     repository: EvaluationRepositoryDependency,
 ) -> EvaluationItemTraceResponse:
-    if await repository.get_run(run_id) is None:
+    run = await repository.get_run(run_id)
+    if run is None:
         raise HTTPException(status_code=404, detail="评测记录不存在")
     item = await repository.get_item(run_id, item_id)
     if item is None:
@@ -497,7 +649,7 @@ async def get_evaluation_item_trace(
             else "该题尚未开始"
         )
         raise HTTPException(status_code=409, detail=detail)
-    return _item_trace(item)
+    return _item_trace(item, run)
 
 
 @router.get("/runs/{run_id}/export")

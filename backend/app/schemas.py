@@ -386,6 +386,7 @@ class AgentModelCallDebug(BaseModel):
     request_body: dict[str, Any]
     response_body: dict[str, Any]
     duration_ms: int
+    tool_call_count: int = Field(default=0, ge=0)
 
 
 class AgentToolExecutionDebug(BaseModel):

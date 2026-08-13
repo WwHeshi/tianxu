@@ -70,6 +70,7 @@ def _report_model_calls(
             request_body=call.request_body,
             response_body=call.raw_response,
             duration_ms=call.latency_ms,
+            tool_call_count=call.tool_call_count,
         )
         for index, call in enumerate(calls, start=1)
     ]
@@ -120,26 +121,29 @@ def _report_debug_trace(
     final_seen = False
     for call in model_calls:
         if call.stage == "action_selection":
-            tool_execution = (
-                tool_executions[tool_index]
-                if tool_index < len(tool_executions)
-                else None
-            )
+            tool_call_count = call.tool_call_count
+            if tool_call_count == 0 and tool_index < len(tool_executions):
+                tool_call_count = 1  # Compatibility with traces stored before this field existed.
+            call_tool_executions = tool_executions[
+                tool_index : tool_index + tool_call_count
+            ]
             steps.append(
                 AgentTraceStep(
                     id=f"action_{call.sequence}",
                     title=f"响应 {call.sequence} · Action",
                     category="model",
-                    status="completed" if tool_execution is not None else "failed",
+                    status="completed" if call_tool_executions else "failed",
                     detail=(
-                        "模型发起 calculate_bazi_chart 工具调用。"
-                        if tool_execution is not None
+                        "模型发起工具调用："
+                        + "、".join(item.name for item in call_tool_executions)
+                        + "。"
+                        if call_tool_executions
                         else validation_error or "模型生成的工具调用无效。"
                     ),
                     duration_ms=call.duration_ms,
                 )
             )
-            if tool_execution is not None:
+            for tool_execution in call_tool_executions:
                 steps.extend(
                     [
                         AgentTraceStep(
@@ -147,7 +151,7 @@ def _report_debug_trace(
                             title=f"执行工具 {tool_execution.sequence}",
                             category="tool",
                             status="completed",
-                            detail="后端校验参数后调用确定性排盘引擎。",
+                            detail=f"后端校验参数后执行 {tool_execution.name}。",
                             duration_ms=tool_execution.duration_ms,
                         ),
                         AgentTraceStep(
@@ -155,11 +159,11 @@ def _report_debug_trace(
                             title=f"Observation {tool_execution.sequence}",
                             category="context",
                             status="completed",
-                            detail="向下一轮模型响应直接返回工具原局结果；当前运势已在用户提示词中提供。",
+                            detail="向下一轮模型响应返回该工具的确定性结果。",
                         ),
                     ]
                 )
-                tool_index += 1
+            tool_index += len(call_tool_executions)
             continue
 
         final_seen = True

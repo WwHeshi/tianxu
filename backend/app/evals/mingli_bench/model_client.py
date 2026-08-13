@@ -55,9 +55,7 @@ class EvaluationModelError(RuntimeError):
         *,
         retryable: bool = False,
         fatal: bool = False,
-        request_snapshot: dict[str, Any] | None = None,
-        response_status_code: int | None = None,
-        raw_response: dict[str, Any] | None = None,
+        agent_trace: dict[str, Any] | None = None,
         latency_ms: int | None = None,
         input_tokens: int = 0,
         output_tokens: int = 0,
@@ -65,9 +63,7 @@ class EvaluationModelError(RuntimeError):
         super().__init__(message)
         self.retryable = retryable
         self.fatal = fatal
-        self.request_snapshot = request_snapshot
-        self.response_status_code = response_status_code
-        self.raw_response = raw_response
+        self.agent_trace = agent_trace
         self.latency_ms = latency_ms
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
@@ -76,9 +72,7 @@ class EvaluationModelError(RuntimeError):
 @dataclass(frozen=True)
 class EvaluationModelResult:
     answer: EvaluationAnswer
-    request_snapshot: dict[str, Any]
-    response_status_code: int
-    raw_response: dict[str, Any]
+    agent_trace: dict[str, Any]
     latency_ms: int
     input_tokens: int
     output_tokens: int
@@ -104,10 +98,9 @@ def _model_call_snapshots(
         {
             "sequence": sequence,
             "stage": call.stage,
-            "request_body": call.request_body,
             "response_body": call.raw_response,
             "duration_ms": call.latency_ms,
-            "status_code": call.status_code,
+            "tool_call_count": call.tool_call_count,
         }
         for sequence, call in enumerate(calls, start=1)
     ]
@@ -143,24 +136,13 @@ async def request_evaluation_answer(
 
     def snapshot(
         *,
-        endpoint: str,
         body: dict[str, Any],
         model_calls: tuple[ToolCallingModelCall, ...],
         tool_executions: tuple[ToolCallingToolExecution, ...],
     ) -> dict[str, Any]:
+        initial_request_body = model_calls[0].request_body if model_calls else body
         return {
-            "method": "POST",
-            "endpoint": endpoint,
-            "provider": run.provider,
-            "api_protocol": run.api_protocol,
-            "model": run.model,
-            "headers": {
-                "Authorization": "Bearer [REDACTED]",
-                "Content-Type": "application/json",
-            },
-            "body": body,
-            "system_prompt": SYSTEM_PROMPT,
-            "user_prompt": user_prompt,
+            "initial_request_body": initial_request_body,
             "model_calls": _model_call_snapshots(model_calls),
             "tool_executions": _tool_execution_snapshots(tool_executions),
         }
@@ -203,14 +185,11 @@ async def request_evaluation_answer(
             message,
             retryable=exc.retryable,
             fatal=exc.fatal,
-            request_snapshot=snapshot(
-                endpoint=exc.endpoint,
+            agent_trace=snapshot(
                 body=exc.request_body,
                 model_calls=exc.model_calls,
                 tool_executions=exc.tool_executions,
             ),
-            response_status_code=exc.response_status_code,
-            raw_response=exc.raw_response or None,
             latency_ms=exc.model_latency_ms,
             input_tokens=exc.input_tokens,
             output_tokens=exc.output_tokens,
@@ -221,14 +200,11 @@ async def request_evaluation_answer(
     except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
         raise EvaluationModelError(
             "模型返回的答案结构不符合约定",
-            request_snapshot=snapshot(
-                endpoint=execution.endpoint,
+            agent_trace=snapshot(
                 body=execution.request_body,
                 model_calls=execution.model_calls,
                 tool_executions=execution.tool_executions,
             ),
-            response_status_code=execution.response_status_code,
-            raw_response=execution.raw_response,
             latency_ms=execution.model_latency_ms,
             input_tokens=execution.input_tokens,
             output_tokens=execution.output_tokens,
@@ -236,14 +212,11 @@ async def request_evaluation_answer(
 
     return EvaluationModelResult(
         answer=answer,
-        request_snapshot=snapshot(
-            endpoint=execution.endpoint,
+        agent_trace=snapshot(
             body=execution.request_body,
             model_calls=execution.model_calls,
             tool_executions=execution.tool_executions,
         ),
-        response_status_code=execution.response_status_code,
-        raw_response=execution.raw_response,
         latency_ms=execution.model_latency_ms,
         input_tokens=execution.input_tokens,
         output_tokens=execution.output_tokens,

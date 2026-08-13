@@ -227,14 +227,17 @@ async def test_model_client_requests_strict_answer_json() -> None:
 
     assert result.answer.answer == "B"
     assert result.input_tokens == 120
-    assert result.response_status_code == 200
     assert observed_headers["authorization"] == "Bearer secret"
-    assert result.request_snapshot["headers"]["Authorization"] == "Bearer [REDACTED]"
-    assert "secret" not in __import__("json").dumps(result.request_snapshot)
+    assert set(result.agent_trace) == {
+        "initial_request_body",
+        "model_calls",
+        "tool_executions",
+    }
+    assert "secret" not in __import__("json").dumps(result.agent_trace)
     assert observed["text"]["format"]["strict"] is True
     assert observed["instructions"] == SYSTEM_PROMPT
     assert observed["tool_choice"] == "auto"
-    assert observed["parallel_tool_calls"] is False
+    assert observed["parallel_tool_calls"] is True
     assert observed["tools"][0]["name"] == "calculate_bazi_chart"
     assert observed["text"]["format"]["schema"]["properties"]["answer"]["enum"] == [
         "A",
@@ -314,13 +317,15 @@ async def test_model_client_runs_action_observation_final_loop() -> None:
     assert result.input_tokens == 280
     assert result.output_tokens == 30
     assert len(observed_bodies) == 2
-    assert len(result.request_snapshot["model_calls"]) == 2
-    assert [call["stage"] for call in result.request_snapshot["model_calls"]] == [
+    assert len(result.agent_trace["model_calls"]) == 2
+    assert [call["stage"] for call in result.agent_trace["model_calls"]] == [
         "action_selection",
         "final_answer",
     ]
-    assert len(result.request_snapshot["tool_executions"]) == 1
-    assert result.request_snapshot["tool_executions"][0]["input"] == expected_input
+    assert "request_body" not in result.agent_trace["model_calls"][0]
+    assert "status_code" not in result.agent_trace["model_calls"][0]
+    assert len(result.agent_trace["tool_executions"]) == 1
+    assert result.agent_trace["tool_executions"][0]["input"] == expected_input
     second_input = observed_bodies[1]["input"]
     assert any(item.get("type") == "function_call" for item in second_input)
     observation = next(
@@ -390,7 +395,7 @@ async def test_chat_completion_reports_reasoning_length_exhaustion() -> None:
     assert observed["tools"][0]["function"]["name"] == "calculate_bazi_chart"
     assert exc_info.value.input_tokens == 100
     assert exc_info.value.output_tokens == 2048
-    assert len(exc_info.value.request_snapshot["model_calls"]) == 1
+    assert len(exc_info.value.agent_trace["model_calls"]) == 1
 
 
 @pytest.mark.asyncio
@@ -455,35 +460,35 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
         saved_items[0].predicted_answer = saved_items[0].correct_answer
         saved_items[0].is_correct = True
         saved_items[0].prompt_sha256 = "a" * 64
-        saved_items[0].request_snapshot = {
-            "method": "POST",
-            "endpoint": "https://example.test/v1/responses",
-            "provider": "openai",
-            "api_protocol": "responses",
-            "model": "test-model",
-            "headers": {
-                "Authorization": "Bearer [REDACTED]",
-                "Content-Type": "application/json",
+        saved_items[0].agent_trace = {
+            "initial_request_body": {
+                "model": "test-model",
+                "instructions": "system prompt",
+                "input": [{"role": "user", "content": "answer-free prompt"}],
             },
-            "body": {"model": "test-model", "input": [{"round": 2}]},
-            "system_prompt": "system prompt",
-            "user_prompt": "answer-free prompt",
             "model_calls": [
                 {
                     "sequence": 1,
                     "stage": "action_selection",
-                    "request_body": {"model": "test-model", "input": [{"round": 1}]},
-                    "response_body": {"output": [{"type": "function_call"}]},
+                    "response_body": {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "call_id": "call_chart",
+                                "name": "calculate_bazi_chart",
+                                "arguments": "{}",
+                            }
+                        ]
+                    },
                     "duration_ms": 6,
-                    "status_code": 200,
+                    "tool_call_count": 1,
                 },
                 {
                     "sequence": 2,
                     "stage": "final_answer",
-                    "request_body": {"model": "test-model", "input": [{"round": 2}]},
                     "response_body": {"output_text": '{"answer":"A"}'},
                     "duration_ms": 7,
-                    "status_code": 200,
+                    "tool_call_count": 0,
                 },
             ],
             "tool_executions": [
@@ -499,17 +504,16 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
                 }
             ],
         }
-        saved_items[0].response_status_code = 200
-        saved_items[0].raw_response = {"id": "response-test"}
         await session.commit()
     trace = await client.get(
         f"/api/v1/admin/evaluations/runs/{started.json()['id']}/items/"
         f"{saved_items[0].id}/trace"
     )
     assert trace.status_code == 200
-    assert trace.json()["request"]["headers"]["Authorization"] == "Bearer [REDACTED]"
     assert trace.json()["system_prompt"] == "system prompt"
     assert trace.json()["user_prompt"] == "answer-free prompt"
+    assert trace.json()["model"] == "test-model"
+    assert trace.json()["endpoint"] == "https://example.test/v1/responses"
     assert [call["stage"] for call in trace.json()["model_calls"]] == [
         "action_selection",
         "final_answer",
@@ -525,10 +529,11 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
         "解析并评分",
     ]
     assert all(step["status"] == "completed" for step in trace.json()["steps"])
-    assert trace.json()["response"] == {
-        "status_code": 200,
-        "body": {"id": "response-test"},
-    }
+    second_request = trace.json()["model_calls"][1]["request_body"]
+    assert [value["type"] for value in second_request["input"][-2:]] == [
+        "function_call",
+        "function_call_output",
+    ]
     exported_json = await client.get(
         f"/api/v1/admin/evaluations/runs/{started.json()['id']}/export?format=json"
     )
@@ -618,17 +623,11 @@ async def test_worker_persists_score_and_progress(
                 confidence=80,
                 reasoning_summary="测试依据",
             ),
-            request_snapshot={
-                "method": "POST",
-                "endpoint": "https://example.test/v1/responses",
-                "provider": "openai",
-                "api_protocol": "responses",
-                "model": "test-model",
-                "headers": {"Authorization": "Bearer [REDACTED]"},
-                "body": {"model": "test-model"},
+            agent_trace={
+                "initial_request_body": {"model": "test-model"},
+                "model_calls": [],
+                "tool_executions": [],
             },
-            response_status_code=200,
-            raw_response={"id": "response-test"},
             latency_ms=12,
             input_tokens=100,
             output_tokens=10,
@@ -650,6 +649,8 @@ async def test_worker_persists_score_and_progress(
     assert statuses_during_model_call == ["running"]
     assert items[0].is_correct is True
     assert items[0].predicted_answer == dataset.answer_for(question.id)
-    assert items[0].request_snapshot["headers"]["Authorization"] == "Bearer [REDACTED]"
-    assert items[0].response_status_code == 200
-    assert items[0].raw_response == {"id": "response-test"}
+    assert items[0].agent_trace == {
+        "initial_request_body": {"model": "test-model"},
+        "model_calls": [],
+        "tool_executions": [],
+    }

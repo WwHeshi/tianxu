@@ -121,7 +121,7 @@ class EvaluationModelCallTrace(BaseModel):
     request_body: dict[str, Any]
     response_body: dict[str, Any]
     duration_ms: int
-    status_code: int | None = None
+    tool_call_count: int = Field(default=0, ge=0)
 
 
 class EvaluationToolExecutionTrace(BaseModel):
@@ -132,31 +132,27 @@ class EvaluationToolExecutionTrace(BaseModel):
     duration_ms: int | None = None
 
 
-class EvaluationRequestTrace(BaseModel):
-    method: Literal["POST"]
-    endpoint: str
-    provider: str
-    api_protocol: str
-    model: str
-    headers: dict[str, str]
-    body: dict[str, Any]
-    system_prompt: str | None = None
-    user_prompt: str | None = None
-    model_calls: list[EvaluationModelCallTrace] = Field(default_factory=list)
+class StoredEvaluationModelCall(BaseModel):
+    sequence: int = Field(ge=1)
+    stage: str
+    response_body: dict[str, Any]
+    duration_ms: int
+    tool_call_count: int = Field(default=0, ge=0)
+
+
+class StoredEvaluationAgentTrace(BaseModel):
+    initial_request_body: dict[str, Any]
+    model_calls: list[StoredEvaluationModelCall] = Field(default_factory=list)
     tool_executions: list[EvaluationToolExecutionTrace] = Field(default_factory=list)
-
-
-class EvaluationResponseTrace(BaseModel):
-    status_code: int | None
-    body: dict[str, Any] | None
 
 
 class EvaluationItemTraceResponse(BaseModel):
     question_id: str
     status: str
     steps: list[EvaluationTraceStep]
-    request: EvaluationRequestTrace | None
-    response: EvaluationResponseTrace
+    api_protocol: str
+    model: str
+    endpoint: str
     system_prompt: str | None = None
     user_prompt: str | None = None
     model_calls: list[EvaluationModelCallTrace] = Field(default_factory=list)

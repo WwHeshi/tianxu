@@ -38,9 +38,7 @@ class ItemOutcome:
     input_tokens: int
     output_tokens: int
     prompt_sha256: str | None
-    request_snapshot: dict | None
-    response_status_code: int | None
-    raw_response: dict | None
+    agent_trace: dict | None
     fatal: bool = False
 
 
@@ -148,9 +146,7 @@ async def _score_one(
             input_tokens=0,
             output_tokens=0,
             prompt_sha256=None,
-            request_snapshot=None,
-            response_status_code=None,
-            raw_response=None,
+            agent_trace=None,
         )
 
     last_error: EvaluationModelError | None = None
@@ -180,9 +176,7 @@ async def _score_one(
                 input_tokens=prior_input_tokens + result.input_tokens,
                 output_tokens=prior_output_tokens + result.output_tokens,
                 prompt_sha256=prompt_sha256,
-                request_snapshot=result.request_snapshot,
-                response_status_code=result.response_status_code,
-                raw_response=result.raw_response,
+                agent_trace=result.agent_trace,
             )
         except EvaluationModelError as exc:
             last_error = exc
@@ -206,9 +200,7 @@ async def _score_one(
         input_tokens=prior_input_tokens,
         output_tokens=prior_output_tokens,
         prompt_sha256=prompt_sha256,
-        request_snapshot=last_error.request_snapshot,
-        response_status_code=last_error.response_status_code,
-        raw_response=last_error.raw_response,
+        agent_trace=last_error.agent_trace,
         fatal=last_error.fatal,
     )
 
@@ -236,9 +228,7 @@ async def _persist_outcomes(run_id: UUID, outcomes: list[ItemOutcome]) -> None:
             item.input_tokens = outcome.input_tokens
             item.output_tokens = outcome.output_tokens
             item.prompt_sha256 = outcome.prompt_sha256
-            item.request_snapshot = outcome.request_snapshot
-            item.response_status_code = outcome.response_status_code
-            item.raw_response = outcome.raw_response
+            item.agent_trace = outcome.agent_trace
 
         run = await session.get(EvaluationRun, run_id)
         if run is None:

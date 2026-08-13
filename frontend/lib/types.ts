@@ -168,19 +168,9 @@ export interface EvaluationItemTrace {
   question_id: string;
   status: EvaluationItem["status"];
   steps: EvaluationTraceStep[];
-  request: {
-    method: "POST";
-    endpoint: string;
-    provider: string;
-    api_protocol: string;
-    model: string;
-    headers: Record<string, string>;
-    body: Record<string, unknown>;
-  } | null;
-  response: {
-    status_code: number | null;
-    body: Record<string, unknown> | null;
-  };
+  api_protocol: string;
+  model: string;
+  endpoint: string;
   system_prompt: string | null;
   user_prompt: string | null;
   model_calls: Array<{
@@ -189,7 +179,7 @@ export interface EvaluationItemTrace {
     request_body: Record<string, unknown>;
     response_body: Record<string, unknown>;
     duration_ms: number;
-    status_code: number | null;
+    tool_call_count: number;
   }>;
   tool_executions: Array<{
     sequence: number;
