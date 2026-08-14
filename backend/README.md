@@ -244,6 +244,13 @@ API 的 `tools` 字段中。模型可以直接返回 Final，也可以按需调�
 评测路径在数据库中使用紧凑快照：只保存首轮请求、各轮模型响应和工具输入输出，后续累积请求
 在读取链路时还原；不持久化固定请求头、HTTP 状态码或与最后一轮重复的顶层请求和响应。
 
+模型历史回传遵循同一条规则：只要后续还会发起模型请求，无论下一轮来自工具结果还是未来的
+用户追问，都回传上一轮的 Reason。Responses 协议回传完整 `output`（包括 reasoning、message
+和 function call item）；Chat Completions 协议回传 assistant 的 `content`、`tool_calls` 以及
+服务商返回的 `reasoning_content`、`reasoning` 或 `thinking`。当前 MVP 尚未实现连续追问；
+Responses 在 `store: false` 下会请求 `reasoning.encrypted_content`，以便无状态回传推理状态。
+没有工具调用时不会产生下一次请求，但最终响应已经可以通过同一历史提取逻辑供未来会话复用。
+
 `calculate_fortune_at` 已作为通用工具提供给未来有明确指定日期查询需求的 Agent。模型参数
 包含性别、真太阳出生时间和北京时间 `as_of_datetime`，不依赖服务端命盘上下文绑定。工具内部复用现有
 确定性完整运势计算，出口只保留查询时点命中的大运、流年和流月，范围外查询不会静默钳制到

@@ -26,6 +26,7 @@ from app.reports import (
 )
 from app.schemas import BaziReport, BirthInput
 from app.security import SecretCipher, SecretEncryptionError
+from app.tool_calling_agent import model_response_history_items
 
 MASTER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
@@ -48,6 +49,56 @@ def sample_report() -> BaziReport:
         current_fortune="当前运势内容",
         recommendations="综合建议内容",
         limitations="传统文化视角，仅供参考。",
+    )
+
+
+def test_responses_history_preserves_reason_without_tool_call() -> None:
+    reasoning = {
+        "type": "reasoning",
+        "id": "reason_1",
+        "summary": [{"type": "summary_text", "text": "reason summary"}],
+        "encrypted_content": "encrypted-reason",
+    }
+    message = {
+        "type": "message",
+        "id": "message_1",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "final answer"}],
+    }
+
+    history = model_response_history_items(
+        {"output": [reasoning, message]},
+        "responses",
+    )
+
+    assert history == (reasoning, message)
+    assert history[0] is not reasoning
+    assert history[1] is not message
+
+
+@pytest.mark.parametrize("reasoning_key", ["reasoning_content", "reasoning", "thinking"])
+def test_chat_history_preserves_reason_without_tool_call(reasoning_key: str) -> None:
+    history = model_response_history_items(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "final answer",
+                        reasoning_key: "reason text",
+                    }
+                }
+            ]
+        },
+        "chat_completions",
+    )
+
+    assert history == (
+        {
+            "role": "assistant",
+            "content": "final answer",
+            reasoning_key: "reason text",
+        },
     )
 
 
@@ -450,6 +501,7 @@ async def test_responses_report_uses_react_tool_loop() -> None:
     first_body = json.loads(requests[0].content)
     second_body = json.loads(requests[1].content)
     assert first_body["tool_choice"] == "auto"
+    assert first_body["include"] == ["reasoning.encrypted_content"]
     assert "max_output_tokens" not in first_body
     assert first_body["tools"][0]["name"] == "calculate_bazi_chart"
     assert first_body["tools"][1]["name"] == "calculate_fortune_at"
@@ -976,6 +1028,7 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
                             "message": {
                                 "role": "assistant",
                                 "content": None,
+                                "reasoning_content": "先获取命盘与当前运势。",
                                 "tool_calls": [
                                     {
                                         "id": "call_chart_chat_1",
@@ -1052,6 +1105,7 @@ async def test_chat_completions_report_uses_messages_and_accepts_json_fence() ->
     assert "不要输出 Markdown 代码块" in first_body["messages"][0]["content"]
     assert "神煞仅作辅助参考" in first_body["messages"][0]["content"]
     assert second_body["tool_choice"] == "auto"
+    assert second_body["messages"][-3]["reasoning_content"] == "先获取命盘与当前运势。"
     assert [item["role"] for item in second_body["messages"][-3:]] == [
         "assistant",
         "tool",

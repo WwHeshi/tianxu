@@ -27,7 +27,6 @@ class RequestedToolCall:
     call_id: str
     name: str
     arguments: str
-    continuation: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -97,6 +96,44 @@ class ToolCallingRunError(RuntimeError):
         self.fatal = fatal
 
 
+_CHAT_REASONING_KEYS = ("reasoning_content", "reasoning", "thinking")
+
+
+def model_response_history_items(
+    payload: dict[str, Any],
+    api_protocol: ApiProtocol,
+) -> tuple[dict[str, Any], ...]:
+    """Build provider-native history for any later tool or user turn.
+
+    Reasoning is replayed whenever a subsequent model request exists, regardless
+    of whether that request is caused by a tool result or a future user follow-up.
+    """
+
+    if api_protocol == "responses":
+        output = payload.get("output")
+        if not isinstance(output, list):
+            return ()
+        return tuple(deepcopy(item) for item in output if isinstance(item, dict))
+
+    if api_protocol == "chat_completions":
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            return ()
+        message = choices[0].get("message")
+        if not isinstance(message, dict):
+            return ()
+        history_message = {
+            "role": "assistant",
+            "content": deepcopy(message.get("content")),
+        }
+        for key in (*_CHAT_REASONING_KEYS, "tool_calls"):
+            if key in message:
+                history_message[key] = deepcopy(message[key])
+        return (history_message,)
+
+    raise ValueError(f"unsupported API protocol: {api_protocol}")
+
+
 def responses_tool_calls(payload: dict[str, Any]) -> tuple[RequestedToolCall, ...]:
     output = payload.get("output")
     if not isinstance(output, list):
@@ -120,7 +157,6 @@ def responses_tool_calls(payload: dict[str, Any]) -> tuple[RequestedToolCall, ..
                 call_id=call_id,
                 name=name,
                 arguments=arguments,
-                continuation=call,
             )
         )
     return tuple(requested)
@@ -136,11 +172,6 @@ def chat_tool_calls(payload: dict[str, Any]) -> tuple[RequestedToolCall, ...]:
     tool_calls = message.get("tool_calls")
     if not isinstance(tool_calls, list) or not tool_calls:
         return ()
-    continuation = {
-        "role": "assistant",
-        "content": message.get("content"),
-        "tool_calls": tool_calls,
-    }
     requested = []
     for call in tool_calls:
         function = call.get("function") if isinstance(call, dict) else None
@@ -154,7 +185,6 @@ def chat_tool_calls(payload: dict[str, Any]) -> tuple[RequestedToolCall, ...]:
                 call_id=call_id,
                 name=name,
                 arguments=arguments,
-                continuation=continuation,
             )
         )
     return tuple(requested)
@@ -281,6 +311,7 @@ async def run_tool_calling_agent(
                 "tool_choice": "auto",
                 "parallel_tool_calls": True,
                 "store": False,
+                "include": ["reasoning.encrypted_content"],
                 "text": {
                     "format": {
                         "type": "json_schema",
@@ -416,10 +447,7 @@ async def run_tool_calling_agent(
                 dispatched_calls.append((requested_call, dispatched))
 
             if api_protocol == "responses":
-                continuation = payload.get("output")
-                if not isinstance(continuation, list):
-                    continuation = [call.continuation for call in requested_calls]
-                responses_input.extend(deepcopy(continuation))
+                responses_input.extend(model_response_history_items(payload, api_protocol))
                 responses_input.extend(
                     {
                         "type": "function_call_output",
@@ -433,7 +461,7 @@ async def run_tool_calling_agent(
                     for requested_call, dispatched in dispatched_calls
                 )
             else:
-                chat_messages.append(deepcopy(requested_calls[0].continuation))
+                chat_messages.extend(model_response_history_items(payload, api_protocol))
                 chat_messages.extend(
                     {
                         "role": "tool",
