@@ -239,6 +239,7 @@ async def test_model_client_requests_strict_answer_json() -> None:
     assert observed["tool_choice"] == "auto"
     assert observed["parallel_tool_calls"] is True
     assert observed["tools"][0]["name"] == "calculate_bazi_chart"
+    assert observed["tools"][1]["name"] == "calculate_fortune_at"
     assert observed["text"]["format"]["schema"]["properties"]["answer"]["enum"] == [
         "A",
         "B",
@@ -393,6 +394,7 @@ async def test_chat_completion_reports_reasoning_length_exhaustion() -> None:
     assert observed["messages"][0]["content"] == SYSTEM_PROMPT
     assert observed["tool_choice"] == "auto"
     assert observed["tools"][0]["function"]["name"] == "calculate_bazi_chart"
+    assert observed["tools"][1]["function"]["name"] == "calculate_fortune_at"
     assert exc_info.value.input_tokens == 100
     assert exc_info.value.output_tokens == 2048
     assert len(exc_info.value.agent_trace["model_calls"]) == 1

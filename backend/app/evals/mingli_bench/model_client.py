@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from ...agent_tools import AgentToolRegistry
+from ...bazi.fortune_tool import fortune_at_agent_tool
 from ...bazi.tool import (
     BaziChartToolInput,
     BaziChartToolResult,
@@ -172,7 +173,8 @@ async def request_evaluation_answer(
                     bazi_chart_agent_tool(
                         expected_tool_input,
                         execute_tool=execute_tool,
-                    )
+                    ),
+                    fortune_at_agent_tool(),
                 ]
             ),
             client=client,
