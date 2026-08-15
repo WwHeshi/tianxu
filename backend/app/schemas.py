@@ -413,7 +413,7 @@ class AgentToolExecutionDebug(BaseModel):
     sequence: int = Field(ge=1)
     name: str
     input: dict[str, Any]
-    output: dict[str, Any]
+    output: dict[str, Any] | list[Any]
     duration_ms: int | None = None
 
 

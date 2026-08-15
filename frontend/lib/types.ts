@@ -485,7 +485,7 @@ export interface AgentDebugTrace {
     sequence: number;
     name: string;
     input: Record<string, unknown>;
-    output: Record<string, unknown>;
+    output: Record<string, unknown> | unknown[];
     duration_ms: number | null;
   }>;
   redacted: string[];

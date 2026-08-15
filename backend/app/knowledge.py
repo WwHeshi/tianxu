@@ -131,6 +131,16 @@ class KnowledgeRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_agent_documents(self) -> list[KnowledgeDocument]:
+        """Load a stable, title-ordered snapshot including raw TXT bytes for one Agent run."""
+
+        result = await self.session.execute(
+            select(KnowledgeDocument)
+            .options(undefer(KnowledgeDocument.file_data))
+            .order_by(KnowledgeDocument.title, KnowledgeDocument.id)
+        )
+        return list(result.scalars())
+
     async def add(self, document: KnowledgeDocument) -> None:
         self.session.add(document)
         await self.session.flush()

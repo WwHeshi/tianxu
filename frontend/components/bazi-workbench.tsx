@@ -1237,7 +1237,7 @@ function ReportGenerator({
       {isGenerating && (
         <div className="report-progress" role="status">
           <LoaderCircle className="spin" size={18} aria-hidden="true" />
-          <div><strong>正在撰写报告</strong><span>模型只接收精简命盘与当前运势，通常需要几十秒。</span></div>
+          <div><strong>正在撰写报告</strong><span>模型会读取精简命盘、当前运势及相关知识库原文，通常需要几十秒。</span></div>
         </div>
       )}
 

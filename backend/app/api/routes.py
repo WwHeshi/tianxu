@@ -14,6 +14,9 @@ from ..credentials import (
     ModelCredentialRepository,
     get_credential_repository,
 )
+from ..knowledge import KnowledgeRepositoryDependency
+from ..knowledge_capability import KnowledgeCapability
+from ..knowledge_tools import KnowledgeToolSession
 from ..models import ModelCredential
 from ..reports import (
     PROMPT_VERSION,
@@ -302,6 +305,7 @@ async def delete_model_settings(
 async def generate_report(
     payload: BirthInput,
     repository: CredentialRepositoryDependency,
+    knowledge_repository: KnowledgeRepositoryDependency,
     user: ReadyUserDependency,
 ) -> ReportGenerationResponse:
     try:
@@ -312,6 +316,9 @@ async def generate_report(
     credential = await repository.get()
     if credential is None:
         raise HTTPException(status_code=409, detail="模型 API 尚未由管理员配置")
+    knowledge_capability = KnowledgeCapability(
+        KnowledgeToolSession(await knowledge_repository.list_agent_documents())
+    )
     try:
         api_key = SecretCipher.from_environment().decrypt(
             credential.encrypted_api_key,
@@ -322,6 +329,7 @@ async def generate_report(
             chart=chart,
             credential=credential,
             api_key=api_key,
+            capabilities=(knowledge_capability,),
         )
     except SecretEncryptionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

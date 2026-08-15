@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+AgentToolOutput = dict[str, Any] | list[Any]
+
 
 class AgentToolError(RuntimeError):
     """Base error raised while validating or dispatching an Agent tool call."""
@@ -63,13 +65,13 @@ class AgentToolDispatchResult:
 
     name: str
     input: dict[str, Any]
-    output: dict[str, Any]
+    output: AgentToolOutput
 
 
 class AgentToolRegistry:
     """The explicit allow-list of tools available to one Agent invocation."""
 
-    def __init__(self, tools: Iterable[AgentTool]) -> None:
+    def __init__(self, tools: Iterable[AgentTool], *, allow_empty: bool = False) -> None:
         registered: dict[str, AgentTool] = {}
         for tool in tools:
             if not tool.name:
@@ -77,13 +79,24 @@ class AgentToolRegistry:
             if tool.name in registered:
                 raise ValueError(f"duplicate Agent tool name: {tool.name}")
             registered[tool.name] = tool
-        if not registered:
+        if not registered and not allow_empty:
             raise ValueError("an Agent tool registry must contain at least one tool")
         self._tools = registered
+
+    @classmethod
+    def empty(cls) -> "AgentToolRegistry":
+        """Create an empty base registry intended to be populated by capabilities."""
+
+        return cls((), allow_empty=True)
 
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
+
+    def extended(self, tools: Iterable[AgentTool]) -> "AgentToolRegistry":
+        """Return a new registry containing the base tools and capability tools."""
+
+        return AgentToolRegistry([*self._tools.values(), *tools], allow_empty=True)
 
     def definitions(self, protocol: str) -> list[dict[str, Any]]:
         if protocol == "responses":

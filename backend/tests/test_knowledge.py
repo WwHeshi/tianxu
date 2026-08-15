@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import AuthRepository, hash_password
-from app.knowledge import clean_uploaded_filename
+from app.knowledge import KnowledgeRepository, clean_uploaded_filename
 from app.models import AuditLog
 
 
@@ -106,6 +106,10 @@ async def test_admin_uploads_browses_and_downloads_supported_txt_encodings(
     assert second_page.json()["has_more"] is False
     assert downloaded.content == raw
     assert downloaded.headers["content-type"] == "application/octet-stream"
+    async with session_factory() as session:
+        agent_documents = await KnowledgeRepository(session).list_agent_documents()
+    assert len(agent_documents) == 1
+    assert agent_documents[0].file_data == raw
 
 
 @pytest.mark.asyncio

@@ -56,9 +56,14 @@ uv run pytest
 - `PATCH /api/v1/admin/users/{user_id}`
 - `POST /api/v1/admin/users/{user_id}/reset-password`
 - `POST /api/v1/admin/users/{user_id}/revoke-sessions`
+- `GET /api/v1/admin/knowledge/documents`
+- `POST /api/v1/admin/knowledge/documents`
+- `GET /api/v1/admin/knowledge/documents/{document_id}/content`
+- `GET /api/v1/admin/knowledge/documents/{document_id}/download`
+- `DELETE /api/v1/admin/knowledge/documents/{document_id}`
 
 账户使用 Argon2id 密码哈希和 PostgreSQL 持久化的可吊销 Session，浏览器仅保存
-HttpOnly Cookie。普通用户可以排盘和生成报告；管理员额外负责用户与模型设置。
+HttpOnly Cookie。普通用户可以排盘和生成报告；管理员额外负责用户、模型设置和知识库资料。
 模型 API 密钥使用 `APP_ENCRYPTION_KEY`（Base64 编码的 32 字节
 主密钥）进行 AES-GCM 加密；数据库只保存密文、末四位和模型连接元数据，GET 响应不返回
 明文密钥。
@@ -71,7 +76,15 @@ HttpOnly Cookie。普通用户可以排盘和生成报告；管理员额外负�
 模型可以按需调用 `calculate_bazi_chart`，也可以直接返回最终报告；调用工具时，后端严格核对
 参数并执行确定性排盘，随后直接把工具原局结果回传。报告用户提示词只提供性别、真太阳出生
 时间和北京时间报告基准时间，不再预先写入当前大运、流年和流月；报告 Agent 需要当前运势时
-调用 `calculate_fortune_at` 获取。当前没有知识库、RAG、引文或对话历史。
+调用 `calculate_fortune_at` 获取。知识库有资料时，系统提示词附加动态书目，Agent 可以通过
+`search_knowledge` 搜索多个精确短语，再用 `read_knowledge` 按临时游标读取原文前后页。系统
+不建立固定切片或向量索引，只向模型返回命中上下文和实际读取页面；cursor 仅用于本次运行的阅读定位和翻页。
+当前仍不保留对话历史。
+
+知识库通过通用 `AgentCapability` 接口接入执行器。能力实例一次注册后，执行器自动附加动态
+提示词、合并能力工具，并在模型给出最终答案后运行能力自己的校验器。`KnowledgeCapability`
+同时封装书目、全文搜索和游标阅读；实例按请求创建，不能跨 Agent
+运行共享游标。以后新增问答或资料研究 Agent 时，无需重复拼装这套知识逻辑。
 
 管理员生成报告时同时返回 `debug_trace`，用于展示模型请求、工具执行、工具结果、最终答案和
 输出校验链路，并按实际响应轮数保存每次模型请求快照。普通用户的成功和失败响应都不包含执行

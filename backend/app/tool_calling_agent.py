@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from time import perf_counter
@@ -10,8 +11,15 @@ from typing import Any, Literal
 
 import httpx
 
+from .agent_capabilities import (
+    AgentCapability,
+    AgentCapabilityError,
+    AgentCapabilityRegistry,
+    AgentCapabilityResult,
+)
 from .agent_tools import (
     AgentToolError,
+    AgentToolOutput,
     AgentToolRegistry,
 )
 
@@ -43,13 +51,14 @@ class ToolCallingModelCall:
 class ToolCallingToolExecution:
     name: str
     input: dict[str, Any]
-    output: dict[str, Any]
+    output: AgentToolOutput
     duration_ms: int
 
 
 @dataclass(frozen=True)
 class ToolCallingResult:
     output_text: str
+    system_prompt: str
     endpoint: str
     request_body: dict[str, Any]
     raw_response: dict[str, Any]
@@ -59,6 +68,7 @@ class ToolCallingResult:
     output_tokens: int
     model_calls: tuple[ToolCallingModelCall, ...]
     tool_executions: tuple[ToolCallingToolExecution, ...]
+    capability_results: tuple[AgentCapabilityResult, ...] = ()
 
 
 class ToolCallingRunError(RuntimeError):
@@ -68,6 +78,7 @@ class ToolCallingRunError(RuntimeError):
         self,
         message: str,
         *,
+        system_prompt: str,
         endpoint: str,
         request_body: dict[str, Any],
         raw_response: dict[str, Any],
@@ -77,11 +88,13 @@ class ToolCallingRunError(RuntimeError):
         output_tokens: int,
         model_calls: tuple[ToolCallingModelCall, ...],
         tool_executions: tuple[ToolCallingToolExecution, ...],
+        capability_results: tuple[AgentCapabilityResult, ...] = (),
         provider_error: bool = False,
         retryable: bool = False,
         fatal: bool = False,
     ) -> None:
         super().__init__(message)
+        self.system_prompt = system_prompt
         self.endpoint = endpoint
         self.request_body = request_body
         self.raw_response = raw_response
@@ -91,6 +104,7 @@ class ToolCallingRunError(RuntimeError):
         self.output_tokens = output_tokens
         self.model_calls = model_calls
         self.tool_executions = tool_executions
+        self.capability_results = capability_results
         self.provider_error = provider_error
         self.retryable = retryable
         self.fatal = fatal
@@ -248,10 +262,17 @@ async def run_tool_calling_agent(
     user_prompt: str,
     output_schema_name: str,
     output_schema: dict[str, Any],
-    tool_registry: AgentToolRegistry,
     client: httpx.AsyncClient,
+    tool_registry: AgentToolRegistry | None = None,
+    capabilities: Iterable[AgentCapability] = (),
 ) -> ToolCallingResult:
-    """Run a provider-neutral tool-calling loop over an explicit tool allow-list."""
+    """Run a tool loop with explicitly registered tools and complete capabilities."""
+
+    capability_registry = AgentCapabilityRegistry(tuple(capabilities))
+    system_prompt = capability_registry.apply_prompt(system_prompt)
+    tool_registry = (tool_registry or AgentToolRegistry.empty()).extended(
+        capability_registry.tools()
+    )
 
     if api_protocol == "responses":
         endpoint = f"{base_url.rstrip('/')}/responses"
@@ -287,6 +308,7 @@ async def run_tool_calling_agent(
     ) -> ToolCallingRunError:
         return ToolCallingRunError(
             message,
+            system_prompt=system_prompt,
             endpoint=endpoint,
             request_body=last_request_body,
             raw_response=last_payload,
@@ -307,9 +329,6 @@ async def run_tool_calling_agent(
                 "model": model,
                 "instructions": system_prompt,
                 "input": deepcopy(responses_input),
-                "tools": tool_registry.definitions("responses"),
-                "tool_choice": "auto",
-                "parallel_tool_calls": True,
                 "store": False,
                 "include": ["reasoning.encrypted_content"],
                 "text": {
@@ -321,15 +340,28 @@ async def run_tool_calling_agent(
                     }
                 },
             }
+            if tool_registry.names:
+                request_body.update(
+                    {
+                        "tools": tool_registry.definitions("responses"),
+                        "tool_choice": "auto",
+                        "parallel_tool_calls": True,
+                    }
+                )
         else:
             request_body = {
                 "model": model,
                 "messages": deepcopy(chat_messages),
-                "tools": tool_registry.definitions("chat_completions"),
-                "tool_choice": "auto",
-                "parallel_tool_calls": True,
                 "stream": False,
             }
+            if tool_registry.names:
+                request_body.update(
+                    {
+                        "tools": tool_registry.definitions("chat_completions"),
+                        "tool_choice": "auto",
+                        "parallel_tool_calls": True,
+                    }
+                )
         last_request_body = request_body
 
         started = perf_counter()
@@ -486,8 +518,14 @@ async def run_tool_calling_agent(
         except ToolCallProtocolError as exc:
             raise run_error(str(exc)) from exc
 
+        try:
+            capability_results = capability_registry.finalize(output_text)
+        except AgentCapabilityError as exc:
+            raise run_error(str(exc)) from exc
+
         return ToolCallingResult(
             output_text=output_text,
+            system_prompt=system_prompt,
             endpoint=endpoint,
             request_body=request_body,
             raw_response=payload,
@@ -497,4 +535,5 @@ async def run_tool_calling_agent(
             output_tokens=total_output_tokens,
             model_calls=tuple(model_calls),
             tool_executions=tuple(tool_executions),
+            capability_results=capability_results,
         )

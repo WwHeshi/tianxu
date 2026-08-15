@@ -11,8 +11,11 @@ from app.api import routes
 from app.auth import get_current_user
 from app.bazi.engine import calculate_chart
 from app.credentials import LOCAL_CREDENTIAL_SCOPE, get_credential_repository
+from app.knowledge import get_knowledge_repository
+from app.knowledge_capability import KnowledgeCapability
+from app.knowledge_tools import KnowledgeToolSession
 from app.main import app
-from app.models import ModelCredential, User
+from app.models import KnowledgeDocument, ModelCredential, User
 from app.reports import (
     ModelOutputFormatError,
     ModelProviderError,
@@ -138,6 +141,11 @@ class FakeCredentialRepository:
         return existed
 
 
+class FakeKnowledgeRepository:
+    async def list_agent_documents(self) -> list:
+        return []
+
+
 @pytest_asyncio.fixture
 async def api_client(
     monkeypatch: pytest.MonkeyPatch,
@@ -145,13 +153,16 @@ async def api_client(
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("APP_ENCRYPTION_KEY", MASTER_KEY)
     repository = FakeCredentialRepository()
+    knowledge_repository = FakeKnowledgeRepository()
     app.dependency_overrides[get_credential_repository] = lambda: repository
+    app.dependency_overrides[get_knowledge_repository] = lambda: knowledge_repository
     test_admin = authenticated_user()
     app.dependency_overrides[get_current_user] = lambda: test_admin
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client, repository
     app.dependency_overrides.pop(get_credential_repository, None)
+    app.dependency_overrides.pop(get_knowledge_repository, None)
     app.dependency_overrides.pop(get_current_user, None)
 
 
@@ -310,7 +321,9 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v19-fortune-tool"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v20-knowledge-tools"
+    assert "knowledge_version" not in data["metadata"]
+    assert "citations" not in data
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
     assert "steps" not in data["debug_trace"]
     assert data["debug_trace"]["request"]["request_count"] == 2
@@ -528,6 +541,116 @@ async def test_responses_report_uses_react_tool_loop() -> None:
         "gender": "male",
         "true_solar_datetime": "1990-01-01T11:30:33",
     }
+
+
+@pytest.mark.asyncio
+async def test_report_agent_searches_and_reads_knowledge() -> None:
+    chart = calculate_chart(BirthInput.model_validate(valid_payload()))
+    credential = ModelCredential(
+        id=1,
+        scope=LOCAL_CREDENTIAL_SCOPE,
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://api.openai.com/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="6789",
+        encryption_key_version="v1",
+    )
+    text = "卷一\n财多身弱，富屋贫人。\n其理仍须结合日主根气细察。"
+    data = text.encode("utf-8")
+    document = KnowledgeDocument(
+        id=uuid4(),
+        title="滴天髓阐微",
+        original_filename="滴天髓阐微.txt",
+        encoding="utf-8",
+        byte_size=len(data),
+        sha256="b" * 64,
+        file_data=data,
+    )
+    knowledge_session = KnowledgeToolSession([document])
+    requests: list[httpx.Request] = []
+    read_cursor = ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal read_cursor
+        requests.append(request)
+        body = json.loads(request.content)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_search_knowledge",
+                            "name": "search_knowledge",
+                            "arguments": json.dumps(
+                                {
+                                    "queries": ["财多身弱"],
+                                    "source_ids": [],
+                                }
+                            ),
+                        }
+                    ]
+                },
+            )
+        if len(requests) == 2:
+            search_output = json.loads(body["input"][-1]["output"])
+            read_cursor = search_output[0]["read_cursor"]
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_read_knowledge",
+                            "name": "read_knowledge",
+                            "arguments": json.dumps(
+                                {"cursor": read_cursor}
+                            ),
+                        }
+                    ]
+                },
+            )
+        report = sample_report().model_copy(
+            update={"career": "传统命理解释需要结合承载能力。"}
+        )
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": report.model_dump_json()}],
+                    }
+                ]
+            },
+        )
+
+    execution = await generate_structured_report(
+        chart=chart,
+        credential=credential,
+        api_key="sk-test",
+        capabilities=(KnowledgeCapability(knowledge_session),),
+        transport=httpx.MockTransport(handler),
+    )
+
+    first_body = json.loads(requests[0].content)
+    assert [tool["name"] for tool in first_body["tools"]] == [
+        "calculate_bazi_chart",
+        "calculate_fortune_at",
+        "search_knowledge",
+        "read_knowledge",
+    ]
+    assert "D001《滴天髓阐微》" in first_body["instructions"]
+    assert [item.name for item in execution.tool_executions] == [
+        "search_knowledge",
+        "read_knowledge",
+    ]
+    assert "知识库版本" not in first_body["instructions"]
+    assert "〔" not in execution.report.career
 
 
 @pytest.mark.asyncio
