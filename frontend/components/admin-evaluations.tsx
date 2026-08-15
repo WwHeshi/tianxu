@@ -2,7 +2,6 @@
 
 import {
   AlertCircle,
-  ArrowLeft,
   Ban,
   CheckCircle2,
   Clock3,
@@ -10,34 +9,29 @@ import {
   FlaskConical,
   History,
   LoaderCircle,
-  LogOut,
   Play,
   RefreshCcw,
-  ShieldCheck,
   Sparkles,
   Trash2,
   Workflow,
   XCircle,
 } from "lucide-react";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentDebugModal } from "@/components/agent-debug-modal";
+import { AdminShell } from "@/components/admin-shell";
+import { useAdminGuard } from "@/hooks/use-admin-guard";
 import {
-  ApiError,
   cancelEvaluationRun,
   deleteEvaluationRun,
   downloadEvaluationExport,
-  getCurrentUser,
   getEvaluationItemTrace,
   getEvaluationItems,
   getEvaluationOverview,
   getEvaluationRun,
   listEvaluationRuns,
-  logout,
   startEvaluationRun,
 } from "@/lib/api";
 import type {
-  CurrentUser,
   EvaluationItem,
   EvaluationItemTrace,
   EvaluationOverview,
@@ -76,7 +70,7 @@ function scopeLabel(run: EvaluationRunSummary): string {
 }
 
 export function AdminEvaluations() {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const { admin, isLoading: isGuardLoading, error: guardError } = useAdminGuard();
   const [overview, setOverview] = useState<EvaluationOverview | null>(null);
   const [runs, setRuns] = useState<EvaluationRunSummary[]>([]);
   const [selectedRun, setSelectedRun] = useState<EvaluationRunDetail | null>(null);
@@ -118,22 +112,13 @@ export function AdminEvaluations() {
   }, []);
 
   const loadPage = useCallback(async () => {
+    if (!admin) return;
     setError("");
     try {
-      const me = await getCurrentUser();
-      if (me.must_change_password) {
-        window.location.replace("/change-password");
-        return;
-      }
-      if (me.role !== "admin") {
-        window.location.replace("/");
-        return;
-      }
       const [nextOverview, runList] = await Promise.all([
         getEvaluationOverview(),
         listEvaluationRuns(),
       ]);
-      setCurrentUser(me);
       setOverview(nextOverview);
       setRuns(runList.items);
       const targetId = nextOverview.active_run?.id ?? runList.items[0]?.id;
@@ -142,19 +127,15 @@ export function AdminEvaluations() {
         await loadRun(targetId, "all", true);
       }
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        window.location.replace("/login");
-        return;
-      }
       setError(requestError instanceof Error ? requestError.message : "无法读取评测中心。仅支持管理员访问。");
     } finally {
       setIsLoading(false);
     }
-  }, [loadRun]);
+  }, [admin, loadRun]);
 
   useEffect(() => {
-    void loadPage();
-  }, [loadPage]);
+    if (admin) void loadPage();
+  }, [admin, loadPage]);
 
   useEffect(() => {
     if (!selectedRun || !selectedActive) return;
@@ -283,11 +264,6 @@ export function AdminEvaluations() {
     }
   }
 
-  async function handleLogout() {
-    await logout().catch(() => undefined);
-    window.location.replace("/login");
-  }
-
   const wrongCount = selectedRun
     ? selectedRun.completed_questions - selectedRun.correct_answers - selectedRun.error_count
     : 0;
@@ -296,19 +272,18 @@ export function AdminEvaluations() {
     [overview?.dataset.sha256],
   );
 
-  if (isLoading) {
-    return <main className="auth-state-page"><LoaderCircle className="spin" size={24} /><p>正在读取评测配置</p></main>;
-  }
-
   return (
-    <main className="admin-page evaluation-page">
-      <header className="admin-topbar">
-        <Link href="/" className="admin-back"><ArrowLeft size={16} />返回排盘</Link>
-        <div><ShieldCheck size={17} /><span>{currentUser?.display_name}</span></div>
-        <button type="button" onClick={() => void handleLogout()}><LogOut size={16} />退出</button>
-      </header>
-
-      <div className="admin-layout evaluation-layout">
+    <AdminShell
+      admin={admin}
+      isLoading={isGuardLoading || isLoading}
+      loadingText="正在读取评测配置"
+      error={guardError}
+      pageClassName="evaluation-page"
+      layoutClassName="evaluation-layout"
+      overlay={activeTrace && (
+        <EvaluationTraceModal trace={activeTrace} onClose={() => setActiveTrace(null)} />
+      )}
+    >
         <section className="admin-heading evaluation-heading">
           <div><p className="eyebrow">AGENT EVALUATION</p><h1>评测中心</h1></div>
           <span>MingLi-Bench · 天序完整运势模式</span>
@@ -430,11 +405,7 @@ export function AdminEvaluations() {
             {runs.length === 0 && <p className="evaluation-empty">还没有评测记录。</p>}
           </div>
         </section>
-      </div>
-      {activeTrace && (
-        <EvaluationTraceModal trace={activeTrace} onClose={() => setActiveTrace(null)} />
-      )}
-    </main>
+    </AdminShell>
   );
 }
 

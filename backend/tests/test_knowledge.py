@@ -1,38 +1,13 @@
-from collections.abc import AsyncIterator
 from uuid import UUID
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import AuthRepository, hash_password
-from app.database import get_session
 from app.knowledge import clean_uploaded_filename
-from app.main import app
-from app.models import AuditLog, Base
-
-
-@pytest_asyncio.fixture
-async def knowledge_client() -> AsyncIterator[
-    tuple[AsyncClient, async_sessionmaker[AsyncSession]]
-]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-
-    async def override_session() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_session] = override_session
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client, session_factory
-    app.dependency_overrides.pop(get_session, None)
-    await engine.dispose()
+from app.models import AuditLog
 
 
 async def create_account(
@@ -62,9 +37,9 @@ async def login(client: AsyncClient, username: str) -> None:
 
 @pytest.mark.asyncio
 async def test_knowledge_endpoints_require_an_administrator(
-    knowledge_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = knowledge_client
+    client, session_factory = database_client
 
     anonymous = await client.get("/api/v1/admin/knowledge/documents")
     assert anonymous.status_code == 401
@@ -90,12 +65,12 @@ async def test_knowledge_endpoints_require_an_administrator(
     ],
 )
 async def test_admin_uploads_browses_and_downloads_supported_txt_encodings(
-    knowledge_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
     filename: str,
     raw: bytes,
     expected_encoding: str,
 ) -> None:
-    client, session_factory = knowledge_client
+    client, session_factory = database_client
     await create_account(session_factory, username="admin", role="admin")
     await login(client, "admin")
 
@@ -135,9 +110,9 @@ async def test_admin_uploads_browses_and_downloads_supported_txt_encodings(
 
 @pytest.mark.asyncio
 async def test_duplicate_invalid_and_oversized_files_are_rejected(
-    knowledge_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = knowledge_client
+    client, session_factory = database_client
     await create_account(session_factory, username="admin", role="admin")
     await login(client, "admin")
     raw = "命理资料".encode("utf-8")
@@ -172,9 +147,9 @@ async def test_duplicate_invalid_and_oversized_files_are_rejected(
 
 @pytest.mark.asyncio
 async def test_deleting_document_removes_data_and_writes_audit_logs(
-    knowledge_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = knowledge_client
+    client, session_factory = database_client
     await create_account(session_factory, username="admin", role="admin")
     await login(client, "admin")
     uploaded = await client.post(

@@ -1,34 +1,10 @@
-from collections.abc import AsyncIterator
 from uuid import UUID
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import AuthRepository, hash_password
-from app.database import get_session
-from app.main import app
-from app.models import Base
-
-
-@pytest_asyncio.fixture
-async def auth_client() -> AsyncIterator[tuple[AsyncClient, async_sessionmaker[AsyncSession]]]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-
-    async def override_session() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_session] = override_session
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client, session_factory
-    app.dependency_overrides.pop(get_session, None)
-    await engine.dispose()
 
 
 async def create_account(
@@ -52,9 +28,9 @@ async def create_account(
 
 @pytest.mark.asyncio
 async def test_protected_chart_requires_login(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, _ = auth_client
+    client, _ = database_client
 
     health = await client.get("/api/v1/health")
     chart = await client.post(
@@ -68,9 +44,9 @@ async def test_protected_chart_requires_login(
 
 @pytest.mark.asyncio
 async def test_first_visit_can_bootstrap_exactly_one_administrator(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, _ = auth_client
+    client, _ = database_client
 
     before = await client.get("/api/v1/auth/bootstrap-status")
     created = await client.post(
@@ -103,9 +79,9 @@ async def test_first_visit_can_bootstrap_exactly_one_administrator(
 
 @pytest.mark.asyncio
 async def test_login_me_and_logout_use_revocable_http_only_cookie(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = auth_client
+    client, session_factory = database_client
     await create_account(
         session_factory,
         username="admin",
@@ -132,9 +108,9 @@ async def test_login_me_and_logout_use_revocable_http_only_cookie(
 
 @pytest.mark.asyncio
 async def test_admin_creates_user_and_temporary_password_must_be_changed(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = auth_client
+    client, session_factory = database_client
     await create_account(
         session_factory,
         username="admin",
@@ -190,9 +166,9 @@ async def test_admin_creates_user_and_temporary_password_must_be_changed(
 
 @pytest.mark.asyncio
 async def test_last_active_admin_cannot_be_disabled(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = auth_client
+    client, session_factory = database_client
     admin_id = await create_account(
         session_factory,
         username="admin",
@@ -215,9 +191,9 @@ async def test_last_active_admin_cannot_be_disabled(
 
 @pytest.mark.asyncio
 async def test_admin_password_reset_sets_permanent_password(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = auth_client
+    client, session_factory = database_client
     await create_account(
         session_factory,
         username="admin",
@@ -258,9 +234,9 @@ async def test_admin_password_reset_sets_permanent_password(
 
 @pytest.mark.asyncio
 async def test_failed_logins_are_throttled_in_database(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
-    client, session_factory = auth_client
+    client, session_factory = database_client
     await create_account(
         session_factory,
         username="reader",
@@ -282,10 +258,10 @@ async def test_failed_logins_are_throttled_in_database(
 
 @pytest.mark.asyncio
 async def test_production_session_mutations_require_trusted_origin(
-    auth_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client, session_factory = auth_client
+    client, session_factory = database_client
     await create_account(
         session_factory,
         username="admin",

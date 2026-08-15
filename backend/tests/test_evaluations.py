@@ -1,17 +1,14 @@
 import json
-from collections.abc import AsyncIterator
 from uuid import UUID
 
 import httpx
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api import evaluation_routes
 from app.auth import AuthRepository, hash_password
 from app.credentials import LOCAL_CREDENTIAL_SCOPE
-from app.database import get_session
 from app.evals.mingli_bench import worker
 from app.evals.mingli_bench.context import (
     SYSTEM_PROMPT,
@@ -28,28 +25,7 @@ from app.evals.mingli_bench.model_client import (
     request_evaluation_answer,
 )
 from app.evals.mingli_bench.repository import EvaluationRepository
-from app.main import app
-from app.models import Base, EvaluationItem, EvaluationRun, ModelCredential
-
-
-@pytest_asyncio.fixture
-async def evaluation_client() -> AsyncIterator[
-    tuple[AsyncClient, async_sessionmaker[AsyncSession]]
-]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-
-    async def override_session() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_session] = override_session
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        yield client, session_factory
-    app.dependency_overrides.pop(get_session, None)
-    await engine.dispose()
+from app.models import EvaluationItem, EvaluationRun, ModelCredential
 
 
 async def _create_admin(
@@ -402,10 +378,10 @@ async def test_chat_completion_reports_reasoning_length_exhaustion() -> None:
 
 @pytest.mark.asyncio
 async def test_admin_can_create_quick_run_without_starting_real_model(
-    evaluation_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client, session_factory = evaluation_client
+    client, session_factory = database_client
     unauthorized = await client.get("/api/v1/admin/evaluations/overview")
     assert unauthorized.status_code == 401
     await _create_admin(session_factory)
@@ -561,10 +537,10 @@ async def test_admin_can_create_quick_run_without_starting_real_model(
 
 @pytest.mark.asyncio
 async def test_worker_persists_score_and_progress(
-    evaluation_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, session_factory = evaluation_client
+    _, session_factory = database_client
     await _configure_model(session_factory)
     dataset = load_dataset()
     question = dataset.get_question("ftb_0001")

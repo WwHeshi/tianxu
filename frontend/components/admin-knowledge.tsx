@@ -2,34 +2,29 @@
 
 import {
   AlertCircle,
-  ArrowLeft,
   BookOpenText,
   CheckCircle2,
   Download,
   FileText,
   LibraryBig,
   LoaderCircle,
-  LogOut,
   RefreshCcw,
   Search,
-  ShieldCheck,
   Trash2,
   Upload,
 } from "lucide-react";
-import Link from "next/link";
 import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { AdminShell } from "@/components/admin-shell";
+import { useAdminGuard } from "@/hooks/use-admin-guard";
 import {
-  ApiError,
   deleteKnowledgeDocument,
   downloadKnowledgeDocument,
-  getCurrentUser,
   getKnowledgeDocumentContent,
   listKnowledgeDocuments,
-  logout,
   uploadKnowledgeDocument,
 } from "@/lib/api";
-import type { CurrentUser, KnowledgeDocument } from "@/lib/types";
+import type { KnowledgeDocument } from "@/lib/types";
 
 const CONTENT_PAGE_SIZE = 50_000;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -53,7 +48,7 @@ function titleFromFilename(filename: string): string {
 
 export function AdminKnowledge() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const { admin, isLoading: isGuardLoading, error: guardError } = useAdminGuard();
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedId, setSelectedId] = useState("");
@@ -95,30 +90,16 @@ export function AdminKnowledge() {
   }
 
   useEffect(() => {
+    if (!admin) return () => undefined;
     let active = true;
     async function load() {
       try {
-        const me = await getCurrentUser();
-        if (!active) return;
-        if (me.must_change_password) {
-          window.location.replace("/change-password");
-          return;
-        }
-        if (me.role !== "admin") {
-          window.location.replace("/");
-          return;
-        }
-        setCurrentUser(me);
         const response = await listKnowledgeDocuments();
         if (!active) return;
         setDocuments(response.items);
         setTotal(response.total);
         setSelectedId(response.items[0]?.id ?? "");
       } catch (requestError) {
-        if (requestError instanceof ApiError && requestError.status === 401) {
-          window.location.replace("/login");
-          return;
-        }
         if (active) {
           setError(requestError instanceof Error ? requestError.message : "无法读取知识库。");
         }
@@ -130,7 +111,7 @@ export function AdminKnowledge() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [admin]);
 
   useEffect(() => {
     let active = true;
@@ -276,29 +257,15 @@ export function AdminKnowledge() {
     }
   }
 
-  async function handleLogout() {
-    await logout().catch(() => undefined);
-    window.location.replace("/login");
-  }
-
-  if (isLoading) {
-    return (
-      <main className="auth-state-page">
-        <LoaderCircle className="spin" size={24} />
-        <p>正在读取知识库</p>
-      </main>
-    );
-  }
-
   return (
-    <main className="admin-page knowledge-page">
-      <header className="admin-topbar">
-        <Link href="/" className="admin-back"><ArrowLeft size={16} />返回排盘</Link>
-        <div><ShieldCheck size={17} /><span>{currentUser?.display_name}</span></div>
-        <button type="button" onClick={() => void handleLogout()}><LogOut size={16} />退出</button>
-      </header>
-
-      <div className="admin-layout knowledge-layout">
+    <AdminShell
+      admin={admin}
+      isLoading={isGuardLoading || isLoading}
+      loadingText="正在读取知识库"
+      error={guardError}
+      pageClassName="knowledge-page"
+      layoutClassName="knowledge-layout"
+    >
         <section className="admin-heading knowledge-heading">
           <div><p className="eyebrow">KNOWLEDGE STORAGE</p><h1>知识库</h1></div>
           <span>{total} 份资料 · 当前列表 {formatFileSize(visibleBytes)}</span>
@@ -421,7 +388,6 @@ export function AdminKnowledge() {
             )}
           </article>
         </section>
-      </div>
-    </main>
+    </AdminShell>
   );
 }

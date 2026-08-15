@@ -2,24 +2,19 @@
 
 import {
   AlertCircle,
-  ArrowLeft,
   CheckCircle2,
   KeyRound,
   LoaderCircle,
-  LogOut,
   Plus,
   RefreshCcw,
-  ShieldCheck,
   UserRoundCog,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { AdminShell } from "@/components/admin-shell";
+import { useAdminGuard } from "@/hooks/use-admin-guard";
 import {
-  ApiError,
   createUser,
-  getCurrentUser,
   listUsers,
-  logout,
   resetUserPassword,
   revokeUserSessions,
   updateUser,
@@ -35,7 +30,7 @@ function formatDate(value: string | null): string {
 }
 
 export function AdminUsers() {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const { admin, isLoading: isGuardLoading, error: guardError } = useAdminGuard();
   const [users, setUsers] = useState<CurrentUser[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,35 +44,22 @@ export function AdminUsers() {
   const [isCreating, setIsCreating] = useState(false);
 
   const load = useCallback(async () => {
+    if (!admin) return;
     setError("");
     try {
-      const me = await getCurrentUser();
-      if (me.must_change_password) {
-        window.location.replace("/change-password");
-        return;
-      }
-      if (me.role !== "admin") {
-        window.location.replace("/");
-        return;
-      }
       const response = await listUsers();
-      setCurrentUser(me);
       setUsers(response.items);
       setTotal(response.total);
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        window.location.replace("/login");
-        return;
-      }
       setError(requestError instanceof Error ? requestError.message : "无法读取用户列表。");
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [admin]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (admin) void load();
+  }, [admin, load]);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -137,24 +119,13 @@ export function AdminUsers() {
     );
   }
 
-  async function handleLogout() {
-    await logout().catch(() => undefined);
-    window.location.replace("/login");
-  }
-
-  if (isLoading) {
-    return <main className="auth-state-page"><LoaderCircle className="spin" size={24} /><p>正在读取用户</p></main>;
-  }
-
   return (
-    <main className="admin-page">
-      <header className="admin-topbar">
-        <Link href="/" className="admin-back"><ArrowLeft size={16} />返回排盘</Link>
-        <div><ShieldCheck size={17} /><span>{currentUser?.display_name}</span></div>
-        <button type="button" onClick={() => void handleLogout()}><LogOut size={16} />退出</button>
-      </header>
-
-      <div className="admin-layout">
+    <AdminShell
+      admin={admin}
+      isLoading={isGuardLoading || isLoading}
+      loadingText="正在读取用户"
+      error={guardError}
+    >
         <section className="admin-heading">
           <div><p className="eyebrow">ACCESS CONTROL</p><h1>用户管理</h1></div>
           <span>共 {total} 个账户</span>
@@ -184,7 +155,7 @@ export function AdminUsers() {
                   const busy = busyUserId === user.id;
                   return (
                     <tr key={user.id}>
-                      <td><strong>{user.display_name}</strong><span>{user.username}{user.id === currentUser?.id ? " · 当前账户" : ""}</span></td>
+                      <td><strong>{user.display_name}</strong><span>{user.username}{user.id === admin?.id ? " · 当前账户" : ""}</span></td>
                       <td>
                         <select
                           value={user.role}
@@ -217,7 +188,6 @@ export function AdminUsers() {
             </table>
           </div>
         </section>
-      </div>
-    </main>
+    </AdminShell>
   );
 }
