@@ -1,13 +1,20 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { ReactNode, useEffect, useMemo } from "react";
 
 interface DebugModelCall {
   sequence: number;
   stage: string;
   request_body: Record<string, unknown>;
   response_body: Record<string, unknown>;
+}
+
+interface DebugToolExecution {
+  sequence: number;
+  name: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown> | unknown[];
 }
 
 type HistoryRole = "system" | "user" | "reason" | "assistant" | "tool";
@@ -298,15 +305,35 @@ function historyFor(protocol: string, modelCalls: DebugModelCall[]): HistoryItem
     : chatHistory(modelCalls);
 }
 
-function displayValue(value: unknown): string {
+function parseEmbeddedJson(value: unknown, depth = 0): unknown {
+  if (depth >= 12) return value;
   if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (
+      !(trimmed.startsWith("{") && trimmed.endsWith("}"))
+      && !(trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) return value;
     try {
-      return JSON.stringify(JSON.parse(value), null, 2);
+      return parseEmbeddedJson(JSON.parse(trimmed), depth + 1);
     } catch {
       return value;
     }
   }
-  return JSON.stringify(value, null, 2) ?? String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => parseEmbeddedJson(item, depth + 1));
+  }
+  const record = asRecord(value);
+  if (!record) return value;
+  return Object.fromEntries(
+    Object.entries(record).map(([key, item]) => [key, parseEmbeddedJson(item, depth + 1)]),
+  );
+}
+
+function displayValue(value: unknown): string {
+  const parsed = parseEmbeddedJson(value);
+  return typeof parsed === "string"
+    ? parsed
+    : JSON.stringify(parsed, null, 2) ?? String(parsed);
 }
 
 function stateLabel(state: HistoryItem["state"]): string | null {
@@ -322,8 +349,10 @@ export function AgentDebugModal({
   toolExecutionCount,
   endpoint,
   modelCalls,
+  toolExecutions = [],
   redacted,
   footerPrefix,
+  headerControls,
   onClose,
 }: {
   apiProtocol: string;
@@ -333,8 +362,10 @@ export function AgentDebugModal({
   toolExecutionCount: number;
   endpoint: string;
   modelCalls: DebugModelCall[];
+  toolExecutions?: DebugToolExecution[];
   redacted: string[];
   footerPrefix?: string;
+  headerControls?: ReactNode;
   onClose: () => void;
 }) {
   const history = useMemo(
@@ -371,6 +402,7 @@ export function AgentDebugModal({
               <h4 id="agent-debug-title">Agent 执行链路</h4>
             </div>
             <div className="agent-debug-heading-actions">
+              {headerControls}
               <button
                 className="icon-button"
                 type="button"
@@ -403,6 +435,21 @@ export function AgentDebugModal({
                     <details>
                       <summary>原始响应 {call.sequence}</summary>
                       <pre>{JSON.stringify(call.response_body, null, 2)}</pre>
+                    </details>
+                  </div>
+                ))}
+                {toolExecutions.map((execution) => (
+                  <div
+                    key={`tool-${execution.sequence}-${execution.name}`}
+                    className="agent-debug-model-pair"
+                  >
+                    <details>
+                      <summary>工具输入 {execution.sequence} · {execution.name}</summary>
+                      <pre>{JSON.stringify(execution.input, null, 2)}</pre>
+                    </details>
+                    <details>
+                      <summary>工具输出 {execution.sequence} · {execution.name}</summary>
+                      <pre>{JSON.stringify(execution.output, null, 2)}</pre>
                     </details>
                   </div>
                 ))}

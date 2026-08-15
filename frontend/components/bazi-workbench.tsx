@@ -14,6 +14,7 @@ import {
   LoaderCircle,
   LogOut,
   MapPin,
+  Network,
   PlugZap,
   RotateCcw,
   Settings,
@@ -319,6 +320,10 @@ export function BaziWorkbench({
               <Link className="settings-button" href="/admin/knowledge">
                 <LibraryBig size={16} aria-hidden="true" />
                 <span>知识库</span>
+              </Link>
+              <Link className="settings-button" href="/admin/graph">
+                <Network size={16} aria-hidden="true" />
+                <span>规则图谱</span>
               </Link>
               <Link className="settings-button" href="/admin/evaluations">
                 <FlaskConical size={16} aria-hidden="true" />

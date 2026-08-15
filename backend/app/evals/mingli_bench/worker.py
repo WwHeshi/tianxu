@@ -13,7 +13,10 @@ from ...auth import utc_now
 from ...bazi.tool import BaziChartToolResult
 from ...credentials import LOCAL_CREDENTIAL_SCOPE, ModelCredentialRepository
 from ...database import SessionFactory
-from ...models import EvaluationItem, EvaluationRun
+from ...knowledge import KnowledgeRepository
+from ...knowledge_capability import KnowledgeCapability
+from ...knowledge_tools import KnowledgeToolSession
+from ...models import EvaluationItem, EvaluationRun, KnowledgeDocument
 from ...security import SecretCipher
 from .context import build_evaluation_prompt
 from .dataset import EvaluationQuestion, load_dataset
@@ -42,7 +45,9 @@ class ItemOutcome:
     fatal: bool = False
 
 
-async def _credential_and_run(run_id: UUID) -> tuple[EvaluationRun, str]:
+async def _credential_run_and_knowledge(
+    run_id: UUID,
+) -> tuple[EvaluationRun, str, tuple[KnowledgeDocument, ...]]:
     async with SessionFactory() as session:
         run = await session.get(EvaluationRun, run_id)
         if run is None:
@@ -58,7 +63,8 @@ async def _credential_and_run(run_id: UUID) -> tuple[EvaluationRun, str]:
             )
         except Exception as exc:
             raise RuntimeError("模型 API 密钥无法解密") from exc
-        return run, api_key
+        documents = await KnowledgeRepository(session).list_agent_documents()
+        return run, api_key, tuple(documents)
 
 
 async def _run_status(run_id: UUID) -> str | None:
@@ -130,6 +136,7 @@ async def _score_one(
     api_key: str,
     client: httpx.AsyncClient,
     chart_cache: dict[str, BaziChartToolResult],
+    knowledge_documents: tuple[KnowledgeDocument, ...],
 ) -> ItemOutcome:
     try:
         user_prompt, _, prompt_sha256 = build_evaluation_prompt(question)
@@ -162,6 +169,9 @@ async def _score_one(
                 question=question,
                 client=client,
                 chart_cache=chart_cache,
+                capabilities=(
+                    KnowledgeCapability(KnowledgeToolSession(list(knowledge_documents))),
+                ),
             )
             predicted = result.answer.answer
             return ItemOutcome(
@@ -272,7 +282,7 @@ async def _persist_outcomes(run_id: UUID, outcomes: list[ItemOutcome]) -> None:
 async def execute_evaluation_run(run_id: UUID) -> None:
     dataset = load_dataset()
     try:
-        run, api_key = await _credential_and_run(run_id)
+        run, api_key, knowledge_documents = await _credential_run_and_knowledge(run_id)
     except Exception as exc:
         await _set_run_state(run_id, "failed", failure_message=str(exc))
         return
@@ -310,6 +320,7 @@ async def execute_evaluation_run(run_id: UUID) -> None:
                             api_key=api_key,
                             client=client,
                             chart_cache=chart_cache,
+                            knowledge_documents=knowledge_documents,
                         )
                         for item in batch
                     ]

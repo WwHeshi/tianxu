@@ -1,10 +1,17 @@
 """API schemas for administrator-triggered MingLi evaluations."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from ...agent_trace import (
+    AgentModelCallTrace as EvaluationModelCallTrace,
+)
+from ...agent_trace import (
+    AgentToolExecutionTrace as EvaluationToolExecutionTrace,
+)
 
 
 class EvaluationStartRequest(BaseModel):
@@ -104,37 +111,6 @@ class EvaluationItemResponse(BaseModel):
 class EvaluationItemList(BaseModel):
     items: list[EvaluationItemResponse]
     total: int
-
-
-class EvaluationModelCallTrace(BaseModel):
-    sequence: int = Field(ge=1)
-    stage: str
-    request_body: dict[str, Any]
-    response_body: dict[str, Any]
-    duration_ms: int
-    tool_call_count: int = Field(default=0, ge=0)
-
-
-class EvaluationToolExecutionTrace(BaseModel):
-    sequence: int = Field(ge=1)
-    name: str
-    input: dict[str, Any]
-    output: dict[str, Any]
-    duration_ms: int | None = None
-
-
-class StoredEvaluationModelCall(BaseModel):
-    sequence: int = Field(ge=1)
-    stage: str
-    response_body: dict[str, Any]
-    duration_ms: int
-    tool_call_count: int = Field(default=0, ge=0)
-
-
-class StoredEvaluationAgentTrace(BaseModel):
-    initial_request_body: dict[str, Any]
-    model_calls: list[StoredEvaluationModelCall] = Field(default_factory=list)
-    tool_executions: list[EvaluationToolExecutionTrace] = Field(default_factory=list)
 
 
 class EvaluationItemTraceResponse(BaseModel):

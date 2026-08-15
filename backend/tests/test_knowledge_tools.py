@@ -80,15 +80,12 @@ def test_search_interleaves_sources_instead_of_filling_one_book_first() -> None:
     )
     result = AgentToolRegistry(session.agent_tools()).dispatch(
         "search_knowledge",
-        json.dumps(
-            {
-                "queries": ["格局"],
-                "source_ids": [],
-            }
-        ),
+        json.dumps({"queries": ["格局"], "source_ids": []}),
     ).output
 
     assert [hit["source_id"] for hit in result[:2]] == ["D001", "D002"]
+    search_tool = session.agent_tools()[0]
+    assert search_tool.input_schema["required"] == ["queries", "source_ids"]
 
 
 def test_catalog_is_compact() -> None:

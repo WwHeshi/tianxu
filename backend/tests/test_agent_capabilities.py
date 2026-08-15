@@ -118,9 +118,7 @@ async def test_agent_can_register_only_a_capability_without_a_base_tool_registry
                 "output": [
                     {
                         "type": "message",
-                        "content": [
-                            {"type": "output_text", "text": '{"answer":"完成"}'}
-                        ],
+                        "content": [{"type": "output_text", "text": '{"answer":"完成"}'}],
                     }
                 ]
             },
@@ -156,3 +154,38 @@ async def test_agent_can_register_only_a_capability_without_a_base_tool_registry
     assert [execution.name for execution in result.tool_executions] == ["memory_search"]
     assert result.system_prompt == "基础提示词\n\n动态目录"
     assert result.capability_results[0].name == "memory"
+
+
+@pytest.mark.asyncio
+async def test_responses_protocol_can_run_without_a_final_output_schema() -> None:
+    observed: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "普通最终回答"}],
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await run_tool_calling_agent(
+            api_protocol="responses",
+            model="test-model",
+            base_url="https://example.test/v1",
+            api_key="sk-test",
+            system_prompt="提示词",
+            user_prompt="问题",
+            output_schema_name=None,
+            output_schema=None,
+            client=client,
+        )
+
+    assert "text" not in observed
+    assert result.output_text == "普通最终回答"

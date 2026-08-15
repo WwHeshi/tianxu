@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
+from inspect import isawaitable
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -36,8 +37,9 @@ class AgentTool:
     description: str
     input_schema: dict[str, Any]
     input_model: type[BaseModel]
-    execute: Callable[[BaseModel], BaseModel]
+    execute: Callable[[BaseModel], BaseModel | Awaitable[BaseModel]]
     authorize: Callable[[BaseModel], None] | None = None
+    terminal: bool = False
 
     def responses_definition(self) -> dict[str, Any]:
         return {
@@ -66,6 +68,7 @@ class AgentToolDispatchResult:
     name: str
     input: dict[str, Any]
     output: AgentToolOutput
+    terminal: bool
 
 
 class AgentToolRegistry:
@@ -93,6 +96,10 @@ class AgentToolRegistry:
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
 
+    def is_terminal(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        return tool.terminal if tool is not None else False
+
     def extended(self, tools: Iterable[AgentTool]) -> "AgentToolRegistry":
         """Return a new registry containing the base tools and capability tools."""
 
@@ -105,7 +112,7 @@ class AgentToolRegistry:
             return [tool.chat_completions_definition() for tool in self._tools.values()]
         raise ValueError(f"unsupported API protocol: {protocol}")
 
-    def dispatch(self, name: str, arguments: str) -> AgentToolDispatchResult:
+    def _validated_call(self, name: str, arguments: str) -> tuple[AgentTool, BaseModel]:
         tool = self._tools.get(name)
         if tool is None:
             raise AgentToolAuthorizationError(f"模型调用了不允许的工具：{name}。")
@@ -118,14 +125,46 @@ class AgentToolRegistry:
 
         if tool.authorize is not None:
             tool.authorize(tool_input)
+        return tool, tool_input
+
+    @staticmethod
+    def _dispatch_result(
+        tool: AgentTool,
+        tool_input: BaseModel,
+        tool_output: BaseModel,
+    ) -> AgentToolDispatchResult:
+        return AgentToolDispatchResult(
+            name=tool.name,
+            input=tool_input.model_dump(mode="json"),
+            output=tool_output.model_dump(mode="json"),
+            terminal=tool.terminal,
+        )
+
+    def dispatch(self, name: str, arguments: str) -> AgentToolDispatchResult:
+        tool, tool_input = self._validated_call(name, arguments)
         try:
             tool_output = tool.execute(tool_input)
+            if isawaitable(tool_output):
+                close = getattr(tool_output, "close", None)
+                if callable(close):
+                    close()
+                raise AgentToolExecutionError(
+                    f"{name} 是异步工具，必须通过异步 Agent 调度器执行。"
+                )
         except AgentToolError:
             raise
         except Exception as exc:
             raise AgentToolExecutionError(f"{name} 工具执行失败：{exc}") from exc
-        return AgentToolDispatchResult(
-            name=name,
-            input=tool_input.model_dump(mode="json"),
-            output=tool_output.model_dump(mode="json"),
-        )
+        return self._dispatch_result(tool, tool_input, tool_output)
+
+    async def dispatch_async(self, name: str, arguments: str) -> AgentToolDispatchResult:
+        tool, tool_input = self._validated_call(name, arguments)
+        try:
+            tool_output = tool.execute(tool_input)
+            if isawaitable(tool_output):
+                tool_output = await tool_output
+        except AgentToolError:
+            raise
+        except Exception as exc:
+            raise AgentToolExecutionError(f"{name} 工具执行失败：{exc}") from exc
+        return self._dispatch_result(tool, tool_input, tool_output)

@@ -49,13 +49,9 @@ class User(Base):
     status: Mapped[str] = mapped_column(
         String(16), default="active", server_default="active", index=True
     )
-    must_change_password: Mapped[bool] = mapped_column(
-        Boolean, default=True, server_default="true"
-    )
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -75,9 +71,7 @@ class AuthSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class LoginThrottle(Base):
@@ -131,6 +125,83 @@ class KnowledgeDocument(Base):
     )
 
 
+class GraphOrganizingJob(Base):
+    """One automatic TXT-to-Neo4j organizing run."""
+
+    __tablename__ = "graph_organizing_jobs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    document_title: Mapped[str] = mapped_column(String(200))
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    api_protocol: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str] = mapped_column(String(512))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(
+        String(24), default="queued", server_default="queued", index=True
+    )
+    total_sections: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    processed_sections: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    current_offset: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    rules_extracted: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    rules_created: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    rules_merged: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    conditions_written: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    relations_written: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    conflicts_written: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ignored_sections: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class GraphOrganizingTrace(Base):
+    """One completed model attempt for one temporary document section."""
+
+    __tablename__ = "graph_organizing_traces"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "section_index",
+            "attempt",
+            name="uq_graph_organizing_traces_job_section_attempt",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("graph_organizing_jobs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    section_index: Mapped[int] = mapped_column(Integer)
+    attempt: Mapped[int] = mapped_column(Integer)
+    start_offset: Mapped[int] = mapped_column(Integer)
+    end_offset: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))
+    rules_extracted: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    agent_trace: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ModelCredential(Base):
     """One encrypted platform model credential managed by administrators."""
 
@@ -148,9 +219,7 @@ class ModelCredential(Base):
     encrypted_api_key: Mapped[str] = mapped_column(Text)
     api_key_last_four: Mapped[str] = mapped_column(String(4))
     encryption_key_version: Mapped[str] = mapped_column(String(32))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -232,9 +301,7 @@ class EvaluationItem(Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     prompt_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     agent_trace: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

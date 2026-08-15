@@ -9,7 +9,7 @@ from typing import Any
 from ...bazi.tool import BaziChartToolInput, BaziChartToolResult, run_bazi_chart_tool
 from .dataset import EvaluationQuestion
 
-PROMPT_VERSION = "mingli-eval-v9-tool-text"
+PROMPT_VERSION = "mingli-eval-v10-knowledge-tools"
 YEAR_PATTERN = re.compile(r"(?<!\d)(?:18|19|20)\d{2}(?!\d)")
 
 SYSTEM_PROMPT = """你是天序八字选择题 Agent。
@@ -80,19 +80,12 @@ def build_evaluation_prompt(
         "birth": {
             "raw": question.birth_info.get("raw"),
             "gender": tool_input.gender.value,
-            "true_solar_datetime": tool_input.true_solar_datetime.isoformat(
-                timespec="seconds"
-            ),
+            "true_solar_datetime": tool_input.true_solar_datetime.isoformat(timespec="seconds"),
         },
         "question": question.question,
-        "options": [
-            {"letter": option.letter, "text": option.text}
-            for option in question.options
-        ],
+        "options": [{"letter": option.letter, "text": option.text} for option in question.options],
     }
-    option_text = "\n".join(
-        f"{option.letter}. {option.text}" for option in question.options
-    )
+    option_text = "\n".join(f"{option.letter}. {option.text}" for option in question.options)
     user_prompt = (
         "请完成以下天序命理选择题：\n"
         f"原始出生资料：{question.birth_info.get('raw') or '未提供'}\n"

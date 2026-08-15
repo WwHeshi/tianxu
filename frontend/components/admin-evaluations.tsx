@@ -476,6 +476,7 @@ function EvaluationTraceModal({
       toolExecutionCount={trace.tool_executions.length}
       endpoint={trace.endpoint}
       modelCalls={trace.model_calls}
+      toolExecutions={trace.tool_executions}
       redacted={trace.redacted}
       footerPrefix={`题目：${trace.question_id} · Prompt SHA-256：${trace.prompt_sha256 ?? "—"}`}
       onClose={onClose}

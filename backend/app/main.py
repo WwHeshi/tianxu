@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -10,21 +11,37 @@ from fastapi.responses import JSONResponse
 from .api.admin_routes import router as admin_router
 from .api.auth_routes import router as auth_router
 from .api.evaluation_routes import router as evaluation_router
+from .api.graph_routes import router as graph_router
 from .api.knowledge_routes import router as knowledge_router
 from .api.routes import router
 from .auth import SESSION_COOKIE_NAME
 from .bazi.engine import ENGINE_VERSION
 from .config import app_environment
 from .evals.mingli_bench.worker import evaluation_task_manager
+from .graph_organizer_worker import graph_organizer_task_manager
+from .graph_store import GraphStoreUnavailable, graph_store
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    await evaluation_task_manager.start()
     try:
-        yield
+        await graph_store.start()
+    except GraphStoreUnavailable:
+        logger.warning("Neo4j 规则图谱当前不可用；其他应用功能继续启动")
+    try:
+        await evaluation_task_manager.start()
+        try:
+            await graph_organizer_task_manager.start()
+            try:
+                yield
+            finally:
+                await graph_organizer_task_manager.stop()
+        finally:
+            await evaluation_task_manager.stop()
     finally:
-        await evaluation_task_manager.stop()
+        await graph_store.close()
 
 
 def _cors_origins() -> list[str]:
@@ -68,6 +85,7 @@ app.include_router(router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(evaluation_router)
+app.include_router(graph_router)
 app.include_router(knowledge_router)
 
 

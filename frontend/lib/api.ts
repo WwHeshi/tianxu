@@ -12,10 +12,16 @@ import type {
   EvaluationStartRequest,
   BootstrapStatus,
   CurrentUser,
+  GraphOrganizingJob,
+  GraphOrganizingJobList,
+  GraphOrganizingTrace,
+  GraphOrganizingTraceList,
   LoginResponse,
   KnowledgeDocument,
   KnowledgeDocumentContent,
   KnowledgeDocumentList,
+  KnowledgeGraphStatus,
+  KnowledgeGraphSnapshot,
   ModelConnectionTestRequest,
   ModelConnectionTestResponse,
   ModelSettings,
@@ -200,6 +206,53 @@ export function listKnowledgeDocuments(search = ""): Promise<KnowledgeDocumentLi
     `/api/v1/admin/knowledge/documents?${query.toString()}`,
     { method: "GET" },
   );
+}
+
+export function getKnowledgeGraphStatus(): Promise<KnowledgeGraphStatus> {
+  return requestJson<KnowledgeGraphStatus>("/api/v1/admin/graph/status", {
+    method: "GET",
+  });
+}
+
+export function getKnowledgeGraphSnapshot(): Promise<KnowledgeGraphSnapshot> {
+  return requestJson<KnowledgeGraphSnapshot>("/api/v1/admin/graph", {
+    method: "GET",
+  });
+}
+
+export function listGraphOrganizingJobs(): Promise<GraphOrganizingJobList> {
+  return requestJson<GraphOrganizingJobList>("/api/v1/admin/graph/jobs", {
+    method: "GET",
+  });
+}
+
+export function listGraphOrganizingTraces(
+  jobId: string,
+): Promise<GraphOrganizingTraceList> {
+  return requestJson<GraphOrganizingTraceList>(
+    `/api/v1/admin/graph/jobs/${jobId}/traces`,
+    { method: "GET" },
+  );
+}
+
+export function getGraphOrganizingTrace(
+  jobId: string,
+  traceId: number,
+): Promise<GraphOrganizingTrace> {
+  return requestJson<GraphOrganizingTrace>(
+    `/api/v1/admin/graph/jobs/${jobId}/traces/${traceId}`,
+    { method: "GET" },
+  );
+}
+
+export function startGraphOrganizingJob(
+  documentId: string,
+): Promise<GraphOrganizingJob> {
+  return requestJson<GraphOrganizingJob>("/api/v1/admin/graph/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_id: documentId }),
+  });
 }
 
 export function uploadKnowledgeDocument(

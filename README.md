@@ -26,10 +26,11 @@
 - 基于结构化命盘与知识库原文的 AI 报告，以及管理员可见的执行链路。
 - MingLi-Bench 管理员评测中心，支持5题、单年40题和完整160题评测。
 - 管理员知识库，支持上传、搜索、分页浏览、下载和删除 TXT 原始资料。
+- 独立 Neo4j 规则图谱、真实关系可视化，以及自动融合 TXT 的整理 Agent。
 
-报告与评测共用通用工具调用执行器，并分别通过显式白名单获得工具权限；通用执行器还支持一次注册完整的 Agent 能力包，由能力包成套提供动态提示词、工具和最终输出处理。评测 Agent 可按需调用确定性排盘工具；报告 Agent 另外注册 `KnowledgeCapability`，自动获得当前书目、`search_knowledge` 和 `read_knowledge`。
+报告与评测共用通用工具调用执行器，并分别通过显式白名单获得工具权限；通用执行器还支持一次注册完整的 Agent 能力包，由能力包成套提供动态提示词、工具和最终输出处理。报告 Agent 与评测 Agent 都注册 `KnowledgeCapability`，自动获得当前书目、`search_knowledge` 和 `read_knowledge`。
 
-知识库采用动态全文阅读方式，不预先建立固定切片：每次报告只把当前书目目录、搜索命中附近的少量上下文，以及 Agent 主动翻页读取的原文发送给模型，不会把整本 TXT 放入提示词。当前尚未引入 BM25、向量检索、Embedding 或对话历史；后续方案见 [Agent 与知识库建设计划](docs/agent-knowledge-base-plan.md)。
+知识库采用动态全文阅读方式，不预先建立固定切片：每次 Agent 运行只把当前书目目录、搜索命中附近的少量上下文，以及 Agent 主动翻页读取的原文发送给模型，不会把整本 TXT 放入提示词。当前尚未引入 BM25、向量检索、Embedding 或对话历史；后续方案见 [Agent 与知识库建设计划](docs/agent-knowledge-base-plan.md)。
 
 ## 管理员知识库
 
@@ -40,6 +41,29 @@
 生成报告时，后端从当前资料生成精简书目，并为本次 Agent 运行创建只读知识会话。`search_knowledge` 精确搜索多个关键词并返回命中附近上下文，`read_knowledge` 使用不可伪造的临时游标读取原文及前后页。cursor 只用于本次 Agent 运行中的阅读定位和翻页，报告结束后即失效，不进入最终报告响应。
 
 上传仅接受最大10MB的 `.txt` 文件。系统识别带 BOM 的 UTF-8、UTF-16 LE/BE，并在无 BOM 时严格尝试 UTF-8 和 GB18030；空文件、重复文件和包含异常二进制控制字符的内容会被拒绝。上传和删除会写入现有管理员审计日志。
+
+## 规则图谱存储
+
+规则图谱使用独立的 Neo4j Community 服务。TXT 完整原文仍只保存在 PostgreSQL；Neo4j
+用于保存整理 Agent 提取的规则、条件逻辑、概念、结论、来源及其关系。
+图数据库启动时只创建 `Rule`、`ConditionGroup`、`Condition`、`Concept`、`Outcome` 和
+`Source` 的唯一标识约束，不会写入演示节点或默认规则。规则的多个条件组之间采用 ANY，
+每组通过 `REQUIRES` 和 `EXCLUDES` 分别表达必须成立及不得出现的条件，避免把原文中的
+“且、或、非”压平成同一种关系。
+
+管理员可从排盘页右上角进入 `/admin/graph`。页面读取并绘制 Neo4j 中的真实节点和关系，
+也可以上传 TXT、选择资料并启动自动整理。整理任务按自然段临时分段阅读，但不把切片永久
+保存；每段提取结果必须带有可在原文中精确定位的连续引文。`search_rule_graph` 每次直接查询
+当前 Neo4j，`submit_rule_graph` 校验后通过固定 Cypher 在单个事务中立即融合当前段落，写入
+成功才结束本段，因此后续段落可以搜索到前面刚写入的规则。Agent 没有执行任意 Cypher、
+删除规则或覆盖既有规则的权限；任务中途失败时，已经成功提交的段落会保留，失败段不会留下
+不完整事务，也不会再请求或校验额外的模型最终回答。
+
+任务进度保存在 PostgreSQL 的 `graph_organizing_jobs` 表中；每个“段落 × 尝试”
+完成或失败后，还会在 `graph_organizing_traces` 中保存紧凑执行轨迹，管理员可从任务卡片进入
+与评测共用的调试弹窗，查看各轮模型请求、响应和工具执行。API 密钥及 Authorization 请求头
+不会写入轨迹。开发环境数据持久化在 Docker 命名卷 `tianxu-dev_neo4j_dev_data`，普通 Compose 环境使用
+`tianxu_neo4j_data`；两者都不进入源码目录或 Git。
 
 ## Docker 热更新开发（推荐）
 
@@ -63,6 +87,8 @@ Copy-Item .env.example .env
 - FastAPI 文档：<http://localhost:8000/docs>
 - 后端健康检查：<http://localhost:8000/api/v1/health>
 - PostgreSQL：`localhost:5432`
+- Neo4j Browser：<http://localhost:7474>
+- Neo4j Bolt：`localhost:7687`
 
 第一次打开前端时，系统会自动进入 `/setup`，引导创建首位管理员并直接登录。创建成功后，
 该初始化入口会永久关闭。如果前端无法使用，也可以通过后端命令行完成初始化：
@@ -107,7 +133,11 @@ npm ci
 npm run dev
 ```
 
-非 Docker 启动前需要提供可用的 `DATABASE_URL` 和 `APP_ENCRYPTION_KEY`。前者用于 PostgreSQL，后者必须是 Base64 编码的 32 字节随机值。模型 API 密钥不放在环境变量中：在页面右上角设置后，后端用 AES-GCM 加密并保存到 PostgreSQL，只向浏览器返回配置状态和末四位。
+非 Docker 启动前需要提供可用的 `DATABASE_URL`、`NEO4J_URI`、`NEO4J_USERNAME`、
+`NEO4J_PASSWORD` 和 `APP_ENCRYPTION_KEY`。本地默认 Neo4j 地址是
+`bolt://localhost:7687`；后端启动时会验证连接并初始化图谱约束。模型 API 密钥不放在环境
+变量中：在页面右上角设置后，后端用 AES-GCM 加密并保存到 PostgreSQL，只向浏览器返回
+配置状态和末四位。
 
 账户密码使用 Argon2id 哈希，登录状态通过 HttpOnly Session Cookie 和 PostgreSQL 管理。普通用户可排盘和生成报告；只有管理员可以管理用户、模型 API、模型评测和知识库资料。生产环境还会校验携带 Session 的写请求来源，并要求 Cookie 使用 HTTPS。
 
@@ -119,7 +149,6 @@ tianxu/
   backend/        # FastAPI API、排盘引擎和 Agent 编排
   docs/           # 架构决策和接口文档
   external/       # 本地固定的第三方评测数据
-  plan.md         # 产品与开发计划
   docker-compose.yml
   docker-compose.dev.yml
   .env.example
@@ -132,7 +161,7 @@ tianxu/
 - 报告通过一次 REST 请求生成固定结构 JSON，不保留对话会话；Agent 只能调用显式允许的确定性排盘、运势和只读知识工具。
 - `AgentCapability` 是通用运行时扩展边界：新 Agent 只需注册一次能力实例，执行器会自动合并该能力的提示词、工具和输出校验；每次请求使用独立实例，不共享游标等运行状态。
 - 管理员知识库的完整浏览接口不向普通用户开放；知识库工具读取的原文只进入本次模型上下文，不进入最终报告响应。
-- 评测数据只从固定的 `data_tianxu.json` 读取，知识库文档不参与 MingLi-Bench 评测提示词。
+- 评测题目与标签只从固定的 `data_tianxu.json` 读取；评测 Agent 另外使用评测开始时载入的知识库快照辅助作答。
 - 出生时间、地点等敏感信息不应写入普通日志。详见 [架构 ADR](docs/adr/0001-architecture.md)。
 
 ## 常用命令
@@ -151,4 +180,5 @@ npm run lint
 npm run build
 ```
 
-`docker compose -f docker-compose.dev.yml down -v` 会删除本地 PostgreSQL 数据卷，仅在明确需要清空开发数据时使用。
+`docker compose -f docker-compose.dev.yml down -v` 会同时删除本地 PostgreSQL 和 Neo4j
+数据卷，仅在明确需要清空全部开发数据时使用。

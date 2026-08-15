@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from .agent_trace import AgentModelCallTrace, AgentToolExecutionTrace
 from .bazi.policy import CalculationPolicy
 
 
@@ -285,6 +286,97 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     service: str
     engine_version: str
+
+
+class KnowledgeGraphStatusResponse(BaseModel):
+    connected: bool
+    database: str
+    node_count: int = Field(ge=0)
+    relationship_count: int = Field(ge=0)
+
+
+class KnowledgeGraphNodeResponse(BaseModel):
+    id: str
+    label: str
+    kind: str
+
+
+class KnowledgeGraphRelationshipResponse(BaseModel):
+    id: str
+    source: str
+    target: str
+    kind: str
+
+
+class KnowledgeGraphSnapshotResponse(BaseModel):
+    nodes: list[KnowledgeGraphNodeResponse]
+    relationships: list[KnowledgeGraphRelationshipResponse]
+
+
+class GraphOrganizingStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: UUID
+
+
+class GraphOrganizingJobResponse(BaseModel):
+    id: UUID
+    document_id: UUID
+    document_title: str
+    model: str
+    status: Literal["queued", "analyzing", "applied", "failed"]
+    total_sections: int
+    processed_sections: int
+    current_offset: int
+    rules_extracted: int
+    rules_created: int
+    rules_merged: int
+    conditions_written: int
+    relations_written: int
+    conflicts_written: int
+    ignored_sections: int
+    input_tokens: int
+    output_tokens: int
+    failure_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class GraphOrganizingJobListResponse(BaseModel):
+    items: list[GraphOrganizingJobResponse]
+
+
+class GraphOrganizingTraceSummaryResponse(BaseModel):
+    id: int
+    section_index: int
+    attempt: int
+    start_offset: int
+    end_offset: int
+    status: Literal["completed", "failed"]
+    rules_extracted: int
+    input_tokens: int
+    output_tokens: int
+    duration_ms: int
+    error_message: str | None
+    created_at: datetime
+
+
+class GraphOrganizingTraceListResponse(BaseModel):
+    items: list[GraphOrganizingTraceSummaryResponse]
+
+
+class GraphOrganizingTraceResponse(GraphOrganizingTraceSummaryResponse):
+    document_title: str
+    api_protocol: str
+    model: str
+    endpoint: str
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+    model_calls: list[AgentModelCallTrace] = Field(default_factory=list)
+    tool_executions: list[AgentToolExecutionTrace] = Field(default_factory=list)
+    redacted: list[str]
 
 
 class KnowledgeDocumentResponse(BaseModel):

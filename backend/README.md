@@ -1,6 +1,7 @@
 # Tianxu Backend
 
-FastAPI 后端，提供确定性排盘、加密模型设置和一次性结构化报告。报告请求不会持久化出生资料。
+FastAPI 后端，提供确定性排盘、加密模型设置、一次性结构化报告和 Neo4j 规则图谱存储。
+报告请求不会持久化出生资料。
 
 排盘引擎另外通过内部工具 `calculate_bazi_chart` 暴露一个最小化、地点无关的调用边界：
 
@@ -26,6 +27,10 @@ uv sync
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8000
 ```
+
+后端启动前需要有可用的 Neo4j，默认连接为 `bolt://localhost:7687`、数据库 `neo4j`。
+应用启动时会验证连接并创建图谱唯一约束，不会写入示例节点。Docker 开发环境已经包含
+Neo4j 服务和独立持久化卷。
 
 首次打开前端时会通过一次性 `/api/v1/auth/bootstrap` 接口创建首位管理员。命令行
 `uv run python -m app.cli create-admin --username admin --display-name 管理员` 可作为无前端时的备用方式。
@@ -61,6 +66,28 @@ uv run pytest
 - `GET /api/v1/admin/knowledge/documents/{document_id}/content`
 - `GET /api/v1/admin/knowledge/documents/{document_id}/download`
 - `DELETE /api/v1/admin/knowledge/documents/{document_id}`
+- `GET /api/v1/admin/graph`
+- `GET /api/v1/admin/graph/status`
+- `GET /api/v1/admin/graph/jobs`
+- `POST /api/v1/admin/graph/jobs`
+- `GET /api/v1/admin/graph/jobs/{job_id}/traces`
+- `GET /api/v1/admin/graph/jobs/{job_id}/traces/{trace_id}`
+
+图谱接口只对管理员开放：快照接口直接读取 Neo4j 的真实节点和关系，任务接口把选定 TXT
+交给整理 Agent。`search_rule_graph` 每次直接读取当前 Neo4j；每段提取结果必须通过
+`submit_rule_graph` 终止工具提交，后端校验连续原文引文后，立即通过固定 Cypher 在单个事务
+中融合该段规则。写入成功才结束本段，后续段落因此能查询到前段的新规则；任务中途失败时
+已成功提交的段落会保留，失败段的事务不会部分写入。Agent 不能执行任意 Cypher，也不会自动
+删除或覆盖已有规则。TXT 原始文件继续保存在 PostgreSQL，临时阅读分段不会落库；Neo4j 只
+保存结构化规则、关系、来源编号和可回查的原文引文位置。提交成功后不再请求或校验模型最终
+回答。每个“段落 × 尝试”完成或失败后会保存一条紧凑执行轨迹，供管理员通过与
+评测共用的调试界面查看模型请求、响应和工具执行；API 密钥及 Authorization 请求头不会
+写入轨迹，迁移前的历史整理任务也不会补生成轨迹。
+
+图谱节点类型固定为 `Rule`、`ConditionGroup`、`Condition`、`Concept`、`Outcome` 和
+`Source`。条件组之间是 ANY，组内 `REQUIRES` 条件全部成立且 `EXCLUDES` 条件均不出现；
+规则还可通过 `EQUIVALENT_TO`、`REFINES`、`EXCEPTION_TO` 和 `CONTRADICTS` 连接既有规则。
+Agent 只能填写固定提交结构，不能创造新的节点标签或关系类型。
 
 账户使用 Argon2id 密码哈希和 PostgreSQL 持久化的可吊销 Session，浏览器仅保存
 HttpOnly Cookie。普通用户可以排盘和生成报告；管理员额外负责用户、模型设置和知识库资料。
@@ -250,7 +277,9 @@ SHA-256。评测使用题面钟表时间、不作地点或真太阳时修正，�
 评测 Agent 与报告 Agent 复用同一个通用工具调用执行器，并分别通过显式工具注册表控制
 本次运行允许模型调用的工具。用户提示词只用自然文本传入原始
 出生资料、性别、作为已归一化排盘时间使用的题面钟表时间、题目和选项；排盘工具说明仅放在
-API 的 `tools` 字段中。模型可以直接返回 Final，也可以按需调用 `calculate_bazi_chart`。
+API 的 `tools` 字段中。评测开始时加载一次当前知识库快照，每个题目使用独立的
+`KnowledgeCapability` 和 cursor 会话。模型可以直接返回 Final，也可以按需调用
+`calculate_bazi_chart`、`search_knowledge` 和 `read_knowledge`。
 工具 Observation 只包含原局，不包含大运、流年或流月。单轮可发起多个工具调用，工具调用
 数量和模型响应轮数不设固定上限。后端会累加所有响应轮次和重试的 Token，
 并在评测调用链路中按“系统提示词、用户提示词、请求体 N、原始响应 N”的顺序展示实际轮次。

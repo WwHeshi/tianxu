@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 from app.agent_tools import (
     AgentTool,
     AgentToolAuthorizationError,
+    AgentToolExecutionError,
     AgentToolRegistry,
 )
 
@@ -60,6 +61,7 @@ def test_registry_validates_and_dispatches_by_name() -> None:
     assert result.name == "echo"
     assert result.input == {"value": "hello"}
     assert result.output == {"echoed": "hello"}
+    assert result.terminal is False
 
 
 def test_registry_rejects_tools_outside_the_agent_allow_list() -> None:
@@ -74,3 +76,28 @@ def test_registry_rejects_empty_and_duplicate_registrations() -> None:
         AgentToolRegistry([])
     with pytest.raises(ValueError, match="duplicate"):
         AgentToolRegistry([echo_tool(), echo_tool()])
+
+
+@pytest.mark.asyncio
+async def test_registry_dispatches_async_tools_without_breaking_sync_tools() -> None:
+    async def execute(payload: BaseModel) -> BaseModel:
+        assert isinstance(payload, EchoInput)
+        return EchoOutput(echoed=f"async:{payload.value}")
+
+    tool = AgentTool(
+        name="async_echo",
+        description="Echo asynchronously.",
+        input_schema=EchoInput.model_json_schema(),
+        input_model=EchoInput,
+        execute=execute,
+        terminal=True,
+    )
+    registry = AgentToolRegistry([tool])
+
+    result = await registry.dispatch_async("async_echo", '{"value":"hello"}')
+
+    assert result.output == {"echoed": "async:hello"}
+    assert result.terminal is True
+    assert registry.is_terminal("async_echo") is True
+    with pytest.raises(AgentToolExecutionError, match="异步工具"):
+        registry.dispatch("async_echo", '{"value":"hello"}')

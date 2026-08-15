@@ -153,9 +153,7 @@ def responses_tool_calls(payload: dict[str, Any]) -> tuple[RequestedToolCall, ..
     if not isinstance(output, list):
         return ()
     calls = [
-        item
-        for item in output
-        if isinstance(item, dict) and item.get("type") == "function_call"
+        item for item in output if isinstance(item, dict) and item.get("type") == "function_call"
     ]
     if not calls:
         return ()
@@ -260,13 +258,16 @@ async def run_tool_calling_agent(
     api_key: str,
     system_prompt: str,
     user_prompt: str,
-    output_schema_name: str,
-    output_schema: dict[str, Any],
+    output_schema_name: str | None,
+    output_schema: dict[str, Any] | None,
     client: httpx.AsyncClient,
     tool_registry: AgentToolRegistry | None = None,
     capabilities: Iterable[AgentCapability] = (),
 ) -> ToolCallingResult:
     """Run a tool loop with explicitly registered tools and complete capabilities."""
+
+    if (output_schema_name is None) != (output_schema is None):
+        raise ValueError("output schema name and schema must be provided together")
 
     capability_registry = AgentCapabilityRegistry(tuple(capabilities))
     system_prompt = capability_registry.apply_prompt(system_prompt)
@@ -276,9 +277,7 @@ async def run_tool_calling_agent(
 
     if api_protocol == "responses":
         endpoint = f"{base_url.rstrip('/')}/responses"
-        responses_input: list[dict[str, Any]] = [
-            {"role": "user", "content": user_prompt}
-        ]
+        responses_input: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
         chat_messages: list[dict[str, Any]] = []
     elif api_protocol == "chat_completions":
         endpoint = f"{base_url.rstrip('/')}/chat/completions"
@@ -331,15 +330,16 @@ async def run_tool_calling_agent(
                 "input": deepcopy(responses_input),
                 "store": False,
                 "include": ["reasoning.encrypted_content"],
-                "text": {
+            }
+            if output_schema_name is not None and output_schema is not None:
+                request_body["text"] = {
                     "format": {
                         "type": "json_schema",
                         "name": output_schema_name,
                         "strict": True,
                         "schema": output_schema,
                     }
-                },
-            }
+                }
             if tool_registry.names:
                 request_body.update(
                     {
@@ -457,11 +457,19 @@ async def run_tool_calling_agent(
         )
 
         if requested_calls:
+            terminal_requested = [
+                requested_call
+                for requested_call in requested_calls
+                if tool_registry.is_terminal(requested_call.name)
+            ]
+            if terminal_requested and len(requested_calls) != 1:
+                raise run_error("终止工具必须单独调用。")
+
             dispatched_calls = []
             for requested_call in requested_calls:
                 tool_started = perf_counter()
                 try:
-                    dispatched = tool_registry.dispatch(
+                    dispatched = await tool_registry.dispatch_async(
                         requested_call.name,
                         requested_call.arguments,
                     )
@@ -477,6 +485,29 @@ async def run_tool_calling_agent(
                     )
                 )
                 dispatched_calls.append((requested_call, dispatched))
+
+            terminal_calls = [
+                dispatched for _, dispatched in dispatched_calls if dispatched.terminal
+            ]
+            if terminal_calls:
+                try:
+                    capability_results = capability_registry.finalize("")
+                except AgentCapabilityError as exc:
+                    raise run_error(str(exc)) from exc
+                return ToolCallingResult(
+                    output_text="",
+                    system_prompt=system_prompt,
+                    endpoint=endpoint,
+                    request_body=request_body,
+                    raw_response=payload,
+                    response_status_code=status_code,
+                    model_latency_ms=total_latency_ms,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    model_calls=tuple(model_calls),
+                    tool_executions=tuple(tool_executions),
+                    capability_results=capability_results,
+                )
 
             if api_protocol == "responses":
                 responses_input.extend(model_response_history_items(payload, api_protocol))

@@ -25,7 +25,9 @@ from app.evals.mingli_bench.model_client import (
     request_evaluation_answer,
 )
 from app.evals.mingli_bench.repository import EvaluationRepository
-from app.models import EvaluationItem, EvaluationRun, ModelCredential
+from app.knowledge_capability import KnowledgeCapability
+from app.knowledge_tools import KnowledgeToolSession
+from app.models import EvaluationItem, EvaluationRun, KnowledgeDocument, ModelCredential
 
 
 async def _create_admin(
@@ -58,6 +60,18 @@ async def _configure_model(
             )
         )
         await session.commit()
+
+
+def _knowledge_document(text: str = "财多身弱，宜察根气。") -> KnowledgeDocument:
+    data = text.encode("utf-8")
+    return KnowledgeDocument(
+        title="滴天髓阐微",
+        original_filename="滴天髓阐微.txt",
+        encoding="utf-8",
+        byte_size=len(data),
+        sha256="a" * 64,
+        file_data=data,
+    )
 
 
 def test_dataset_adapter_separates_questions_from_labels() -> None:
@@ -228,6 +242,60 @@ async def test_model_client_requests_strict_answer_json() -> None:
         "minLength": 1,
         "maxLength": 120,
     }
+
+
+@pytest.mark.asyncio
+async def test_model_client_can_register_knowledge_capability() -> None:
+    observed: dict = {}
+    question = load_dataset().get_question("ftb_0001")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "output_text": (
+                    '{"answer":"B","confidence":73,'
+                    '"reasoning_summary":"结合命盘与知识资料判断"}'
+                )
+            },
+        )
+
+    run = EvaluationRun(
+        dataset_name="test",
+        dataset_sha256="0" * 64,
+        dataset_question_count=1,
+        scope="quick",
+        mode="tianxu_fortune",
+        max_concurrency=1,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://example.test/v1",
+        prompt_version="test",
+        engine_version="test",
+        calculation_policy_version="v2",
+        total_questions=1,
+    )
+    capability = KnowledgeCapability(KnowledgeToolSession([_knowledge_document()]))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await request_evaluation_answer(
+            run=run,
+            api_key="secret",
+            user_prompt="question without answer",
+            question=question,
+            client=client,
+            capabilities=(capability,),
+        )
+
+    assert result.answer.answer == "B"
+    assert "D001《滴天髓阐微》" in observed["instructions"]
+    assert [tool["name"] for tool in observed["tools"]] == [
+        "calculate_bazi_chart",
+        "calculate_fortune_at",
+        "search_knowledge",
+        "read_knowledge",
+    ]
 
 
 @pytest.mark.asyncio
@@ -556,7 +624,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v9-tool-text",
+            prompt_version="mingli-eval-v10-knowledge-tools",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,
@@ -569,6 +637,7 @@ async def test_worker_persists_score_and_progress(
         created_items = await EvaluationRepository(session).all_items(run.id)
         created_item_id = created_items[0].id
         created_items[0].status = "running"
+        session.add(_knowledge_document())
         await session.commit()
 
     class FakeCipher:
@@ -580,8 +649,13 @@ async def test_worker_persists_score_and_progress(
             return "test-key"
 
     statuses_during_model_call: list[str] = []
+    knowledge_prompts: list[str] = []
 
     async def fake_model_call(**_kwargs) -> EvaluationModelResult:
+        capabilities = _kwargs["capabilities"]
+        assert isinstance(capabilities, tuple)
+        assert len(capabilities) == 1
+        knowledge_prompts.append(capabilities[0].prompt_section())
         async with session_factory() as session:
             active_item = await session.get(EvaluationItem, created_item_id)
             assert active_item is not None
@@ -616,6 +690,8 @@ async def test_worker_persists_score_and_progress(
     assert saved_run.correct_answers == 1
     assert saved_run.input_tokens == 100
     assert statuses_during_model_call == ["running"]
+    assert len(knowledge_prompts) == 1
+    assert "D001《滴天髓阐微》" in knowledge_prompts[0]
     assert items[0].is_correct is True
     assert items[0].predicted_answer == dataset.answer_for(question.id)
     assert items[0].agent_trace == {

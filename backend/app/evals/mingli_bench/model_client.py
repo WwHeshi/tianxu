@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
+from ...agent_capabilities import AgentCapability
 from ...agent_tools import AgentToolRegistry
+from ...agent_trace import snapshot_agent_trace
 from ...bazi.fortune_tool import fortune_at_agent_tool
 from ...bazi.tool import (
     BaziChartToolInput,
@@ -19,9 +22,7 @@ from ...bazi.tool import (
 )
 from ...models import EvaluationRun
 from ...tool_calling_agent import (
-    ToolCallingModelCall,
     ToolCallingRunError,
-    ToolCallingToolExecution,
     run_tool_calling_agent,
 )
 from .context import (
@@ -92,36 +93,6 @@ def _json_object(text: str) -> dict[str, Any]:
     return value
 
 
-def _model_call_snapshots(
-    calls: tuple[ToolCallingModelCall, ...],
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "sequence": sequence,
-            "stage": call.stage,
-            "response_body": call.raw_response,
-            "duration_ms": call.latency_ms,
-            "tool_call_count": call.tool_call_count,
-        }
-        for sequence, call in enumerate(calls, start=1)
-    ]
-
-
-def _tool_execution_snapshots(
-    executions: tuple[ToolCallingToolExecution, ...],
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "sequence": sequence,
-            "name": execution.name,
-            "input": execution.input,
-            "output": execution.output,
-            "duration_ms": execution.duration_ms,
-        }
-        for sequence, execution in enumerate(executions, start=1)
-    ]
-
-
 async def request_evaluation_answer(
     *,
     run: EvaluationRun,
@@ -130,23 +101,11 @@ async def request_evaluation_answer(
     question: EvaluationQuestion,
     client: httpx.AsyncClient,
     chart_cache: dict[str, BaziChartToolResult] | None = None,
+    capabilities: Iterable[AgentCapability] = (),
 ) -> EvaluationModelResult:
     expected_tool_input = chart_tool_input_for_question(question)
     if run.api_protocol not in {"responses", "chat_completions"}:
         raise EvaluationModelError("评测运行使用了不支持的模型协议", fatal=True)
-
-    def snapshot(
-        *,
-        body: dict[str, Any],
-        model_calls: tuple[ToolCallingModelCall, ...],
-        tool_executions: tuple[ToolCallingToolExecution, ...],
-    ) -> dict[str, Any]:
-        initial_request_body = model_calls[0].request_body if model_calls else body
-        return {
-            "initial_request_body": initial_request_body,
-            "model_calls": _model_call_snapshots(model_calls),
-            "tool_executions": _tool_execution_snapshots(tool_executions),
-        }
 
     def execute_tool(tool_input: BaziChartToolInput) -> BaziChartToolResult:
         if chart_cache is not None:
@@ -178,6 +137,7 @@ async def request_evaluation_answer(
                 ]
             ),
             client=client,
+            capabilities=capabilities,
         )
     except ToolCallingRunError as exc:
         message = str(exc)
@@ -187,7 +147,7 @@ async def request_evaluation_answer(
             message,
             retryable=exc.retryable,
             fatal=exc.fatal,
-            agent_trace=snapshot(
+            agent_trace=snapshot_agent_trace(
                 body=exc.request_body,
                 model_calls=exc.model_calls,
                 tool_executions=exc.tool_executions,
@@ -202,7 +162,7 @@ async def request_evaluation_answer(
     except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
         raise EvaluationModelError(
             "模型返回的答案结构不符合约定",
-            agent_trace=snapshot(
+            agent_trace=snapshot_agent_trace(
                 body=execution.request_body,
                 model_calls=execution.model_calls,
                 tool_executions=execution.tool_executions,
@@ -214,7 +174,7 @@ async def request_evaluation_answer(
 
     return EvaluationModelResult(
         answer=answer,
-        agent_trace=snapshot(
+        agent_trace=snapshot_agent_trace(
             body=execution.request_body,
             model_calls=execution.model_calls,
             tool_executions=execution.tool_executions,

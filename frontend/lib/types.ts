@@ -57,6 +57,114 @@ export interface KnowledgeDocumentContent {
   has_more: boolean;
 }
 
+export interface KnowledgeGraphStatus {
+  connected: boolean;
+  database: string;
+  node_count: number;
+  relationship_count: number;
+}
+
+export interface KnowledgeGraphNode {
+  id: string;
+  label: string;
+  kind: string;
+}
+
+export interface KnowledgeGraphRelationship {
+  id: string;
+  source: string;
+  target: string;
+  kind: string;
+}
+
+export interface KnowledgeGraphSnapshot {
+  nodes: KnowledgeGraphNode[];
+  relationships: KnowledgeGraphRelationship[];
+}
+
+export type GraphOrganizingJobStatus =
+  | "queued"
+  | "analyzing"
+  | "applied"
+  | "failed";
+
+export interface GraphOrganizingJob {
+  id: string;
+  document_id: string;
+  document_title: string;
+  model: string;
+  status: GraphOrganizingJobStatus;
+  total_sections: number;
+  processed_sections: number;
+  current_offset: number;
+  rules_extracted: number;
+  rules_created: number;
+  rules_merged: number;
+  conditions_written: number;
+  relations_written: number;
+  conflicts_written: number;
+  ignored_sections: number;
+  input_tokens: number;
+  output_tokens: number;
+  failure_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GraphOrganizingJobList {
+  items: GraphOrganizingJob[];
+}
+
+export interface AgentModelCallTrace {
+  sequence: number;
+  stage: string;
+  request_body: Record<string, unknown>;
+  response_body: Record<string, unknown>;
+  duration_ms: number;
+  tool_call_count: number;
+}
+
+export interface AgentToolExecutionTrace {
+  sequence: number;
+  name: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown> | unknown[];
+  duration_ms: number | null;
+}
+
+export interface GraphOrganizingTraceSummary {
+  id: number;
+  section_index: number;
+  attempt: number;
+  start_offset: number;
+  end_offset: number;
+  status: "completed" | "failed";
+  rules_extracted: number;
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface GraphOrganizingTraceList {
+  items: GraphOrganizingTraceSummary[];
+}
+
+export interface GraphOrganizingTrace extends GraphOrganizingTraceSummary {
+  document_title: string;
+  api_protocol: string;
+  model: string;
+  endpoint: string;
+  system_prompt: string | null;
+  user_prompt: string | null;
+  model_calls: AgentModelCallTrace[];
+  tool_executions: AgentToolExecutionTrace[];
+  redacted: string[];
+}
+
 export interface AdminUserCreate {
   username: string;
   display_name: string;
@@ -190,21 +298,8 @@ export interface EvaluationItemTrace {
   endpoint: string;
   system_prompt: string | null;
   user_prompt: string | null;
-  model_calls: Array<{
-    sequence: number;
-    stage: string;
-    request_body: Record<string, unknown>;
-    response_body: Record<string, unknown>;
-    duration_ms: number;
-    tool_call_count: number;
-  }>;
-  tool_executions: Array<{
-    sequence: number;
-    name: string;
-    input: Record<string, unknown>;
-    output: Record<string, unknown>;
-    duration_ms: number | null;
-  }>;
+  model_calls: AgentModelCallTrace[];
+  tool_executions: AgentToolExecutionTrace[];
   prompt_sha256: string | null;
   redacted: string[];
 }
@@ -474,20 +569,8 @@ export interface AgentDebugTrace {
     body: Record<string, unknown>;
   };
   raw_response: Record<string, unknown>;
-  model_calls: Array<{
-    sequence: number;
-    stage: "action_selection" | "final_answer";
-    request_body: Record<string, unknown>;
-    response_body: Record<string, unknown>;
-    duration_ms: number;
-  }>;
-  tool_executions: Array<{
-    sequence: number;
-    name: string;
-    input: Record<string, unknown>;
-    output: Record<string, unknown> | unknown[];
-    duration_ms: number | null;
-  }>;
+  model_calls: AgentModelCallTrace[];
+  tool_executions: AgentToolExecutionTrace[];
   redacted: string[];
 }
 
