@@ -103,10 +103,7 @@ def one_rule(excerpt: str) -> ExtractedGraphRule:
         does_not_prove=[],
         source_excerpt=excerpt,
         existing_rule_id="",
-        equivalent_to_ids=[],
-        refines_ids=[],
-        exception_to_ids=[],
-        conflicts_with_ids=[],
+        rule_links=[],
     )
 
 

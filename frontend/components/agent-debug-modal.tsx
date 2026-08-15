@@ -10,13 +10,6 @@ interface DebugModelCall {
   response_body: Record<string, unknown>;
 }
 
-interface DebugToolExecution {
-  sequence: number;
-  name: string;
-  input: Record<string, unknown>;
-  output: Record<string, unknown> | unknown[];
-}
-
 type HistoryRole = "system" | "user" | "reason" | "assistant" | "tool";
 
 interface HistoryItem {
@@ -349,7 +342,6 @@ export function AgentDebugModal({
   toolExecutionCount,
   endpoint,
   modelCalls,
-  toolExecutions = [],
   redacted,
   footerPrefix,
   headerControls,
@@ -362,7 +354,6 @@ export function AgentDebugModal({
   toolExecutionCount: number;
   endpoint: string;
   modelCalls: DebugModelCall[];
-  toolExecutions?: DebugToolExecution[];
   redacted: string[];
   footerPrefix?: string;
   headerControls?: ReactNode;
@@ -435,21 +426,6 @@ export function AgentDebugModal({
                     <details>
                       <summary>原始响应 {call.sequence}</summary>
                       <pre>{JSON.stringify(call.response_body, null, 2)}</pre>
-                    </details>
-                  </div>
-                ))}
-                {toolExecutions.map((execution) => (
-                  <div
-                    key={`tool-${execution.sequence}-${execution.name}`}
-                    className="agent-debug-model-pair"
-                  >
-                    <details>
-                      <summary>工具输入 {execution.sequence} · {execution.name}</summary>
-                      <pre>{JSON.stringify(execution.input, null, 2)}</pre>
-                    </details>
-                    <details>
-                      <summary>工具输出 {execution.sequence} · {execution.name}</summary>
-                      <pre>{JSON.stringify(execution.output, null, 2)}</pre>
                     </details>
                   </div>
                 ))}

@@ -158,7 +158,6 @@ function GraphTraceModal({
       toolExecutionCount={trace.tool_executions.length}
       endpoint={trace.endpoint}
       modelCalls={trace.model_calls}
-      toolExecutions={trace.tool_executions}
       redacted={trace.redacted}
       headerControls={(
         <label className="graph-trace-selector">

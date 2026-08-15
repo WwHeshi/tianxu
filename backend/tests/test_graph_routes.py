@@ -244,7 +244,7 @@ async def test_graph_trace_endpoints_reuse_agent_trace_shape(database_client) ->
                         "sequence": 1,
                         "name": "submit_rule_graph",
                         "input": {"rules": []},
-                        "output": {"accepted": True, "rule_count": 0},
+                        "output": {"created": 0, "merged": 0},
                         "duration_ms": 1,
                     }
                 ],

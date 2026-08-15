@@ -29,39 +29,30 @@ from .graph_store import (
 )
 from .tool_calling_agent import ToolCallingRunError, run_tool_calling_agent
 
-GRAPH_ORGANIZER_PROMPT_VERSION = "graph-organizer-v4"
+GRAPH_ORGANIZER_PROMPT_VERSION = "graph-organizer-v7"
 SECTION_TARGET_CHARACTERS = 2_000
 SECTION_MAX_CHARACTERS = 2_500
 
 GRAPH_ORGANIZER_INSTRUCTIONS = (
-    "你是命理规则图谱的整理 Agent。你只处理本次提供的 TXT 原文段落，目标是把原文中"
-    "明确表达、可跨命例复用的判断规则准确映射到现有图谱。\n\n"
+    "你是命理知识图谱整理 Agent。只处理本次提供的 TXT 原文段落，把原文明示、脱离上下文仍可"
+    "理解并能用于后续命理分析的知识命题写入图谱。\n\n"
     "遵守以下约定：\n"
-    "1. 只提取原文明示且可以独立复用的规则。单个命例、故事、目录、页眉、书目信息以及"
-    "信息不足的残句不能自行提升为通用规则，也不得用段外知识补全。\n"
-    "2. 一条规则表达一个完整判断。不要把同一判断的必要条件和结论拆成互不完整的多条规则，"
-    "也不要把原文中彼此独立的判断强行合成一条。\n"
-    "3. 每条规则都必须提供足以支持该规则的 source_excerpt。它必须是本段原文中的一段连续"
-    "文字并逐字保留，不得改写、拼接或使用仅在附近但不能支持规则的文字。\n"
-    "4. name 使用简短、稳定、可独立理解的规则名称；summary 准确概括适用条件和结论，不添加"
-    "原文没有表达的因果、程度、吉凶或必然性。\n"
-    "5. condition_groups 保留原文的条件逻辑：外层各组之间是 ANY；每组 all_of 中的条件必须"
-    "同时成立（ALL），none_of 中任一条件都不得出现（NOT）。无前提规则返回空数组，不得把"
-    "原文的‘或’放进同一个 all_of，也不得遗漏原文明示的限制条件。\n"
-    "6. 字段各司其职：concepts 填写规则涉及的核心概念；strengthened_by 和 weakened_by 只填写"
-    "原文明示会增强或削弱规则效力的因素；outcomes 只填写规则直接结论；does_not_prove 只填写"
-    "原文明示不能由该规则推出的结论。没有对应内容时使用空数组。\n"
-    "7. 只要 rules 非空，提交前必须用 search_rule_graph 查询每个候选规则的 name。一次最多"
-    "查询 30 个名称，应尽量合并到最少批次；每个候选得到明确结果后，不要再换同义词重复查询。\n"
-    "8. 只有既有规则与候选规则的适用条件和结论实质相同，才填写 existing_rule_id；仅名称相似、"
-    "概念相关或结论部分重合时不得合并。无法确认时使用空字符串，让它成为新规则。\n"
-    "9. equivalent_to_ids、refines_ids、exception_to_ids 和 conflicts_with_ids 只填写通过工具"
-    "找到且逻辑关系明确的既有规则编号。更具体不等于冲突，结论不同也不自动构成冲突；不确定时"
-    "返回空数组。\n"
-    "10. 不要删除、覆盖或纠正既有规则。原文没有可提取规则时，也必须调用 submit_rule_graph，"
-    "并把 rules 传为空数组。\n"
-    "11. 完成必要查询后，必须且只能单独调用一次 submit_rule_graph 提交本段全部规则。只有该"
-    "工具写入成功才表示本段完成；成功后不需要再生成最终回答。"
+    "1. 可提取基础定义、属性映射、对应或比较关系、生克顺序、通用原理和条件判断；知识不要求"
+    "具有‘当……则……’句式，也不要求包含吉凶结论。目录、页眉、书目信息、作者经历、纯叙事、"
+    "孤立命例和信息不足的残句不提取，不使用段外知识补全。\n"
+    "2. 一条规则表达一个可独立理解的知识命题。name 简短明确，summary 忠实概括，不添加原文"
+    "没有表达的因果、程度或必然性。source_excerpt 必须是足以支持该命题的本段连续原文，逐字"
+    "保留，不得改写或拼接。\n"
+    "3. concepts 填主要概念，outcomes 填原文直接陈述的事实或结论。没有前提时 condition_groups"
+    " 必须直接传空数组，不得创建 all_of 和 none_of 都为空的条件组。条件判断的组间为任一组"
+    "成立，all_of 为同时成立，none_of 为不得出现。strengthened_by、weakened_by 和"
+    " does_not_prove 只填写原文明示的内容；其余填空数组。\n"
+    "4. rules 非空时，提交前用 search_rule_graph 批量查询每个候选名称。适用条件和结论实质相同"
+    "才用 existing_rule_id 合并；名称相似或部分重合不能合并，无法确认时留空。\n"
+    "5. rule_links 只关联搜索到且关系明确的规则：REFINES 表示本规则更具体，EXCEPTION_TO 表示"
+    "本规则是其例外，CONTRADICTS 表示两者确有冲突；语义相同应合并，不建立关系。\n"
+    "6. 最后单独调用一次 submit_rule_graph 提交本段全部规则；没有可提取知识时提交空 rules。"
+    "工具写入成功即完成本段，不再生成最终回答。"
 )
 
 
@@ -90,6 +81,13 @@ class ExtractedConditionGroup(BaseModel):
         return self
 
 
+class ExtractedRuleLink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=100)
+    relation: Literal["REFINES", "EXCEPTION_TO", "CONTRADICTS"]
+
+
 class ExtractedGraphRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -104,10 +102,22 @@ class ExtractedGraphRule(BaseModel):
     does_not_prove: list[str] = Field(max_length=40)
     source_excerpt: str = Field(min_length=1, max_length=4000)
     existing_rule_id: str = Field(max_length=100)
-    equivalent_to_ids: list[str] = Field(max_length=30)
-    refines_ids: list[str] = Field(max_length=30)
-    exception_to_ids: list[str] = Field(max_length=30)
-    conflicts_with_ids: list[str] = Field(max_length=30)
+    rule_links: list[ExtractedRuleLink] = Field(max_length=30)
+
+    @field_validator("condition_groups", mode="before")
+    @classmethod
+    def discard_empty_condition_groups(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        return [
+            group
+            for group in value
+            if not (
+                isinstance(group, dict)
+                and not group.get("all_of")
+                and not group.get("none_of")
+            )
+        ]
 
 
 class GraphExtractionOutput(BaseModel):
@@ -119,13 +129,8 @@ class GraphExtractionOutput(BaseModel):
 class SubmitRuleGraphResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    accepted: bool
-    rule_count: int
-    rules_created: int
-    rules_merged: int
-    conditions_written: int
-    relations_written: int
-    conflicts_written: int
+    created: int
+    merged: int
 
 
 class SearchRuleGraphInput(BaseModel):
@@ -705,13 +710,8 @@ class GraphOrganizerCapability:
         self._submitted = extraction
         self._apply_result = apply_result
         return SubmitRuleGraphResult(
-            accepted=True,
-            rule_count=len(extraction.rules),
-            rules_created=apply_result.rules_created,
-            rules_merged=apply_result.rules_merged,
-            conditions_written=apply_result.conditions_written,
-            relations_written=apply_result.relations_written,
-            conflicts_written=apply_result.conflicts_written,
+            created=apply_result.rules_created,
+            merged=apply_result.rules_merged,
         )
 
     def finalize(self, output_text: str) -> AgentCapabilityResult:
@@ -856,7 +856,6 @@ class _MutableRule:
     weakened_by: list[str]
     outcomes: list[str]
     does_not_prove: list[str]
-    equivalent_to_ids: list[str]
     refines_ids: list[str]
     exception_to_ids: list[str]
     conflicts_with_ids: list[str]
@@ -923,7 +922,6 @@ def merge_graph_extractions(
                     weakened_by=[],
                     outcomes=[],
                     does_not_prove=[],
-                    equivalent_to_ids=[],
                     refines_ids=[],
                     exception_to_ids=[],
                     conflicts_with_ids=[],
@@ -946,17 +944,14 @@ def merge_graph_extractions(
             current.weakened_by.extend(candidate.weakened_by)
             current.outcomes.extend(candidate.outcomes)
             current.does_not_prove.extend(candidate.does_not_prove)
-            for target, values in (
-                (current.equivalent_to_ids, candidate.equivalent_to_ids),
-                (current.refines_ids, candidate.refines_ids),
-                (current.exception_to_ids, candidate.exception_to_ids),
-                (current.conflicts_with_ids, candidate.conflicts_with_ids),
-            ):
-                target.extend(
-                    other_id
-                    for other_id in values
-                    if other_id in existing_by_id and other_id != rule_id
-                )
+            link_targets = {
+                "REFINES": current.refines_ids,
+                "EXCEPTION_TO": current.exception_to_ids,
+                "CONTRADICTS": current.conflicts_with_ids,
+            }
+            for link in candidate.rule_links:
+                if link.id in existing_by_id and link.id != rule_id:
+                    link_targets[link.relation].append(link.id)
             excerpt = GraphSourceExcerpt(
                 text=excerpt_text,
                 start=section.start + excerpt_index,
@@ -977,7 +972,7 @@ def merge_graph_extractions(
             weakened_by=_unique_texts(rule.weakened_by),
             outcomes=_unique_texts(rule.outcomes),
             does_not_prove=_unique_texts(rule.does_not_prove),
-            equivalent_to_ids=tuple(dict.fromkeys(rule.equivalent_to_ids)),
+            equivalent_to_ids=(),
             refines_ids=tuple(dict.fromkeys(rule.refines_ids)),
             exception_to_ids=tuple(dict.fromkeys(rule.exception_to_ids)),
             conflicts_with_ids=tuple(dict.fromkeys(rule.conflicts_with_ids)),

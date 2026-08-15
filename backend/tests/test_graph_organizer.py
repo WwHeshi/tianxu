@@ -121,10 +121,7 @@ def extracted_rule(**overrides) -> ExtractedGraphRule:
         "does_not_prove": ["必然暴富"],
         "source_excerpt": "财星得地，财有根基。",
         "existing_rule_id": "",
-        "equivalent_to_ids": [],
-        "refines_ids": [],
-        "exception_to_ids": [],
-        "conflicts_with_ids": [],
+        "rule_links": [],
     }
     values.update(overrides)
     return ExtractedGraphRule.model_validate(values)
@@ -150,6 +147,19 @@ def test_condition_group_rejects_the_same_positive_and_negative_condition() -> N
         ExtractedConditionGroup(all_of=["身旺"], none_of=["身旺"])
 
 
+def test_rule_discards_empty_condition_groups_before_validation() -> None:
+    rule = extracted_rule(
+        condition_groups=[
+            {"all_of": [], "none_of": []},
+            {"all_of": ["身旺"], "none_of": []},
+        ]
+    )
+
+    assert [group.model_dump() for group in rule.condition_groups] == [
+        {"all_of": ["身旺"], "none_of": []}
+    ]
+
+
 def test_merge_validates_excerpt_and_uses_existing_rule_alias() -> None:
     text = "前言。财星得地，财有根基。后文。"
     section = DocumentSection(index=0, start=100, end=100 + len(text), text=text)
@@ -166,7 +176,10 @@ def test_merge_validates_excerpt_and_uses_existing_rule_alias() -> None:
             extracted_rule(
                 aliases=["财星有根", "财星有根"],
                 concepts=["财星", "财星"],
-                conflicts_with_ids=["R-existing", "R-missing"],
+                rule_links=[
+                    {"id": "R-existing", "relation": "CONTRADICTS"},
+                    {"id": "R-missing", "relation": "CONTRADICTS"},
+                ],
             ),
             extracted_rule(
                 name="无原文规则",
@@ -201,6 +214,45 @@ def test_new_rule_uses_stable_id_deterministically() -> None:
 
     assert first[0].id == stable_graph_node_id("R", "财星得地")
     assert first == second
+
+
+def test_merge_maps_rule_links_to_internal_relationships() -> None:
+    text = "财星得地，财有根基。"
+    section = DocumentSection(index=0, start=0, end=len(text), text=text)
+    existing_rules = tuple(
+        GraphRuleSummary(
+            id=rule_id,
+            name=name,
+            summary=name,
+            aliases=(),
+            concepts=(),
+            outcomes=(),
+        )
+        for rule_id, name in (
+            ("R-refined", "宽泛规则"),
+            ("R-exception", "一般规则"),
+            ("R-conflict", "相反规则"),
+        )
+    )
+    extraction = GraphExtractionOutput(
+        rules=[
+            extracted_rule(
+                rule_links=[
+                    {"id": "R-refined", "relation": "REFINES"},
+                    {"id": "R-exception", "relation": "EXCEPTION_TO"},
+                    {"id": "R-conflict", "relation": "CONTRADICTS"},
+                    {"id": "R-missing", "relation": "CONTRADICTS"},
+                ]
+            )
+        ]
+    )
+
+    mutation = merge_graph_extractions(((section, extraction),), existing_rules)[0]
+
+    assert mutation.equivalent_to_ids == ()
+    assert mutation.refines_ids == ("R-refined",)
+    assert mutation.exception_to_ids == ("R-exception",)
+    assert mutation.conflicts_with_ids == ("R-conflict",)
 
 
 @pytest.mark.asyncio
@@ -306,9 +358,7 @@ async def test_graph_capability_searches_live_then_writes_through_submit_tool() 
 
     submission = GraphExtractionOutput(rules=[extracted_rule()])
     receipt = await tools["submit_rule_graph"].execute(submission)
-    assert receipt.accepted is True
-    assert receipt.rule_count == 1
-    assert receipt.rules_merged == 1
+    assert receipt.model_dump() == {"created": 0, "merged": 1}
     assert store.list_calls == 2
     assert store.apply_calls[0]["rules"][0].id == "R-wealth"
 
@@ -330,13 +380,27 @@ async def test_empty_live_graph_still_offers_search_and_submit_tools() -> None:
 
     assert list(tools) == ["search_rule_graph", "submit_rule_graph"]
     search_tool = tools["search_rule_graph"]
+    submit_schema = tools["submit_rule_graph"].input_schema
+    rule_properties = submit_schema["$defs"]["ExtractedGraphRule"]["properties"]
+    assert "rule_links" in rule_properties
+    assert not {
+        "equivalent_to_ids",
+        "refines_ids",
+        "exception_to_ids",
+        "conflicts_with_ids",
+    } & rule_properties.keys()
+    assert submit_schema["$defs"]["ExtractedRuleLink"]["properties"]["relation"][
+        "enum"
+    ] == ["REFINES", "EXCEPTION_TO", "CONTRADICTS"]
     result = await search_tool.execute(
         search_tool.input_model(queries=["财星得地", "官杀混杂"])
     )
     assert [item.query for item in result.root] == ["财星得地", "官杀混杂"]
     assert all(item.rules == [] for item in result.root)
     assert "当前真实规则图谱" in capability.prompt_section()
-    assert "只要 rules 非空" in GRAPH_ORGANIZER_INSTRUCTIONS
+    assert "基础定义、属性映射、对应或比较关系" in GRAPH_ORGANIZER_INSTRUCTIONS
+    assert "知识不要求具有‘当……则……’句式" in GRAPH_ORGANIZER_INSTRUCTIONS
+    assert "condition_groups 必须直接传空数组" in GRAPH_ORGANIZER_INSTRUCTIONS
     assert "适用条件和结论实质相同" in GRAPH_ORGANIZER_INSTRUCTIONS
     assert "快照" not in capability.prompt_section()
 
