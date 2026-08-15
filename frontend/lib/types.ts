@@ -30,6 +30,33 @@ export interface UserListResponse {
   limit: number;
 }
 
+export interface KnowledgeDocument {
+  id: string;
+  title: string;
+  original_filename: string;
+  encoding: string;
+  byte_size: number;
+  sha256: string;
+  created_at: string;
+}
+
+export interface KnowledgeDocumentList {
+  items: KnowledgeDocument[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface KnowledgeDocumentContent {
+  document_id: string;
+  content: string;
+  offset: number;
+  limit: number;
+  next_offset: number;
+  total_characters: number;
+  has_more: boolean;
+}
+
 export interface AdminUserCreate {
   username: string;
   display_name: string;

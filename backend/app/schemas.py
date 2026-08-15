@@ -287,6 +287,35 @@ class HealthResponse(BaseModel):
     engine_version: str
 
 
+class KnowledgeDocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    original_filename: str
+    encoding: str
+    byte_size: int
+    sha256: str
+    created_at: datetime
+
+
+class KnowledgeDocumentListResponse(BaseModel):
+    items: list[KnowledgeDocumentResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class KnowledgeDocumentContentResponse(BaseModel):
+    document_id: UUID
+    content: str
+    offset: int
+    limit: int
+    next_offset: int
+    total_characters: int
+    has_more: bool
+
+
 ApiProtocol = Literal["responses", "chat_completions"]
 
 

@@ -13,6 +13,9 @@ import type {
   BootstrapStatus,
   CurrentUser,
   LoginResponse,
+  KnowledgeDocument,
+  KnowledgeDocumentContent,
+  KnowledgeDocumentList,
   ModelConnectionTestRequest,
   ModelConnectionTestResponse,
   ModelSettings,
@@ -188,6 +191,70 @@ export function revokeUserSessions(userId: string): Promise<void> {
   return requestJson<void>(`/api/v1/admin/users/${userId}/revoke-sessions`, {
     method: "POST",
   });
+}
+
+export function listKnowledgeDocuments(search = ""): Promise<KnowledgeDocumentList> {
+  const query = new URLSearchParams({ offset: "0", limit: "200" });
+  if (search.trim()) query.set("search", search.trim());
+  return requestJson<KnowledgeDocumentList>(
+    `/api/v1/admin/knowledge/documents?${query.toString()}`,
+    { method: "GET" },
+  );
+}
+
+export function uploadKnowledgeDocument(
+  file: File,
+  title: string,
+): Promise<KnowledgeDocument> {
+  const form = new FormData();
+  form.set("file", file);
+  if (title.trim()) form.set("title", title.trim());
+  return requestJson<KnowledgeDocument>(
+    "/api/v1/admin/knowledge/documents",
+    { method: "POST", body: form },
+    60_000,
+  );
+}
+
+export function getKnowledgeDocumentContent(
+  documentId: string,
+  offset = 0,
+  limit = 50_000,
+): Promise<KnowledgeDocumentContent> {
+  const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  return requestJson<KnowledgeDocumentContent>(
+    `/api/v1/admin/knowledge/documents/${documentId}/content?${query.toString()}`,
+    { method: "GET" },
+  );
+}
+
+export function deleteKnowledgeDocument(documentId: string): Promise<void> {
+  return requestJson<void>(`/api/v1/admin/knowledge/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function downloadKnowledgeDocument(
+  documentId: string,
+  filename: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/admin/knowledge/documents/${documentId}/download`,
+    { credentials: "include" },
+  );
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as FastApiValidationError | null;
+    throw new ApiError(getErrorMessage(payload, response.status), response.status);
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export function getEvaluationOverview(): Promise<EvaluationOverview> {

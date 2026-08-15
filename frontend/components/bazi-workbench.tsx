@@ -10,6 +10,7 @@ import {
   FlaskConical,
   Info,
   KeyRound,
+  LibraryBig,
   LoaderCircle,
   LogOut,
   MapPin,
@@ -315,6 +316,10 @@ export function BaziWorkbench({
         <div className="topbar-actions">
           {currentUser.role === "admin" && (
             <>
+              <Link className="settings-button" href="/admin/knowledge">
+                <LibraryBig size={16} aria-hidden="true" />
+                <span>知识库</span>
+              </Link>
               <Link className="settings-button" href="/admin/evaluations">
                 <FlaskConical size={16} aria-hidden="true" />
                 <span>评测中心</span>
