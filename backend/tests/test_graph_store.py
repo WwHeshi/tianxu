@@ -567,7 +567,6 @@ def graph_mutation(rule_id: str, *, detailed: bool) -> GraphRuleMutation:
         weakened_by=("受制",) if detailed else (),
         outcomes=("财运",) if detailed else (),
         does_not_prove=("暴富",) if detailed else (),
-        equivalent_to_ids=("R-old",) if detailed else (),
         refines_ids=("R-old",) if detailed else (),
         exception_to_ids=("R-old",) if detailed else (),
         conflicts_with_ids=("R-old",) if detailed else (),
@@ -592,12 +591,12 @@ async def test_graph_store_applies_validated_rules_in_one_write_transaction() ->
         rules_created=1,
         rules_merged=1,
         conditions_written=6,
-        relations_written=17,
+        relations_written=16,
         conflicts_written=1,
     )
     assert len(driver.sessions) == 1
     calls = driver.sessions[0].transaction.calls
-    assert len(calls) == 18
+    assert len(calls) == 17
     assert all("DROP" not in query.upper() for query, _parameters in calls)
     rule_parameters = next(
         parameters for query, parameters in calls if "SOURCED_FROM" in query

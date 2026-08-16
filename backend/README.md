@@ -102,6 +102,10 @@ Session 可以继续搜索或分批提交，后续段落也能查询到已写入
 评测共用的调试界面查看模型请求、响应和工具执行；API 密钥及 Authorization 请求头不会
 写入轨迹，迁移前的历史整理任务也不会补生成轨迹。
 
+规则合并必须通过 `existing_rule_id` 明确指定。编号不存在，或者编号留空但候选名称或别名与
+现有规则完全相同时，`submit_rule_graph` 会返回可修正错误；Agent 必须明确填写已有编号，或
+使用可区分的新名称重新提交。BM25 和向量检索只用于提供候选，不会触发自动语义合并。
+
 排队任务可以立即暂停；正在分析的任务会在当前段落完成并记录进度后暂停。继续和失败重试
 沿用原任务，从 `current_offset` 指向的未完成段落接着执行，并保留已有图谱、统计和轨迹。
 取消会终止当前 Agent Session 并释放后台 Worker；已经成功写入 Neo4j 的事务和历史轨迹保留，
@@ -109,7 +113,7 @@ Session 可以继续搜索或分批提交，后续段落也能查询到已写入
 
 图谱节点类型固定为 `Rule`、`ConditionGroup`、`Condition`、`Concept`、`Outcome` 和
 `Source`。条件组之间是 ANY，组内 `REQUIRES` 条件全部成立且 `EXCLUDES` 条件均不出现；
-规则还可通过 `EQUIVALENT_TO`、`REFINES`、`EXCEPTION_TO` 和 `CONTRADICTS` 连接既有规则。
+规则还可通过 `REFINES`、`EXCEPTION_TO` 和 `CONTRADICTS` 连接既有规则。
 Agent 只能填写固定提交结构，不能创造新的节点标签或关系类型。
 
 账户使用 Argon2id 密码哈希和 PostgreSQL 持久化的可吊销 Session，浏览器仅保存

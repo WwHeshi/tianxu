@@ -13,7 +13,7 @@ from .agent_capabilities import (
     AgentCapabilityOutputError,
     AgentCapabilityResult,
 )
-from .agent_tools import AgentTool
+from .agent_tools import AgentTool, AgentToolInputError
 from .agent_trace import snapshot_agent_trace
 from .config import graph_organizer_section_timeout_seconds
 from .graph_store import (
@@ -29,7 +29,7 @@ from .graph_store import (
 from .rule_graph_capability import RuleGraphReadCapability
 from .tool_calling_agent import ToolCallingRunError, run_tool_calling_agent
 
-GRAPH_ORGANIZER_PROMPT_VERSION = "graph-organizer-v13"
+GRAPH_ORGANIZER_PROMPT_VERSION = "graph-organizer-v14"
 SECTION_TARGET_CHARACTERS = 2_000
 SECTION_MAX_CHARACTERS = 2_500
 
@@ -47,7 +47,8 @@ GRAPH_ORGANIZER_INSTRUCTIONS = (
     "成立，all_of 为同时成立，none_of 为不得出现。strengthened_by、weakened_by 和"
     " does_not_prove 只填写原文明示的内容；其余填空数组。\n"
     "4. rules 非空时，提交前用 search_rule_graph 批量查询每个候选名称。适用条件和结论实质相同"
-    "才用 existing_rule_id 合并；名称相似或部分重合不能合并，无法确认时留空。\n"
+    "才填写 existing_rule_id；新规则传空字符串。工具报告编号无效或存在同名规则时，"
+    "按错误信息重新搜索，明确选择已有编号，或使用可区分的新名称后再次提交。\n"
     "5. rule_links 只关联搜索到且关系明确的规则：REFINES 表示本规则更具体，EXCEPTION_TO 表示"
     "本规则是其例外，CONTRADICTS 表示两者确有冲突；语义相同应合并，不建立关系。\n"
     "6. 调用 submit_rule_graph 提交规则；没有可提取知识时提交空 rules。工具返回 error 时按其中"
@@ -100,7 +101,13 @@ class ExtractedGraphRule(BaseModel):
     weakened_by: list[str] = Field(max_length=40)
     outcomes: list[str] = Field(max_length=40)
     does_not_prove: list[str] = Field(max_length=40)
-    existing_rule_id: str = Field(max_length=100)
+    existing_rule_id: str = Field(
+        max_length=100,
+        description=(
+            "确认与现有规则实质相同时填写 search_rule_graph 返回的规则 id；"
+            "新规则传空字符串。"
+        ),
+    )
     rule_links: list[ExtractedRuleLink] = Field(max_length=30)
 
     @field_validator("condition_groups", mode="before")
@@ -439,37 +446,54 @@ def merge_graph_extractions(
     """Combine section outputs and attach their server-known source ranges."""
 
     existing_by_id = {rule.id: rule for rule in existing_rules}
-    existing_by_key: dict[str, str] = {}
+    existing_by_key: dict[str, list[str]] = {}
     for rule in existing_rules:
         for value in (rule.name, *rule.aliases):
             key = normalize_graph_key(value)
             if key:
-                existing_by_key.setdefault(key, rule.id)
+                ids = existing_by_key.setdefault(key, [])
+                if rule.id not in ids:
+                    ids.append(rule.id)
 
     merged: dict[str, _MutableRule] = {}
     for section, extraction in extracted_sections:
-        for candidate in extraction.rules:
+        for candidate_index, candidate in enumerate(extraction.rules):
             name = _clean_text(candidate.name, maximum=200)
             summary = _clean_text(candidate.summary)
             if not name or not summary:
                 continue
 
             rule_id = candidate.existing_rule_id.strip()
-            if rule_id not in existing_by_id:
-                rule_id = ""
+            if rule_id and rule_id not in existing_by_id:
+                raise AgentToolInputError(
+                    f"rules.{candidate_index}.existing_rule_id（{name}）："
+                    f"规则编号 {rule_id} 不存在；请重新使用 search_rule_graph 查询后填写"
+                    "有效编号，或传空字符串新建。"
+                )
             if not rule_id:
                 candidate_keys = (
                     normalize_graph_key(name),
                     *(normalize_graph_key(value) for value in candidate.aliases),
                 )
-                rule_id = next(
-                    (
-                        existing_by_key[key]
+                matching_ids = tuple(
+                    dict.fromkeys(
+                        rule_id
                         for key in candidate_keys
-                        if key and key in existing_by_key
-                    ),
-                    stable_graph_node_id("R", name),
+                        if key
+                        for rule_id in existing_by_key.get(key, ())
+                    )
                 )
+                if matching_ids:
+                    matches = "、".join(
+                        f'{rule_id}「{existing_by_id[rule_id].name}」'
+                        for rule_id in matching_ids[:5]
+                    )
+                    raise AgentToolInputError(
+                        f"rules.{candidate_index}.existing_rule_id（{name}）："
+                        f"发现同名或同别名规则 {matches}；如为同一规则，请明确填写对应编号；"
+                        "如不是同一规则，请使用可区分的规则名称。"
+                    )
+                rule_id = stable_graph_node_id("R", name)
 
             current = merged.get(rule_id)
             if current is None:
@@ -533,7 +557,6 @@ def merge_graph_extractions(
             weakened_by=_unique_texts(rule.weakened_by),
             outcomes=_unique_texts(rule.outcomes),
             does_not_prove=_unique_texts(rule.does_not_prove),
-            equivalent_to_ids=(),
             refines_ids=tuple(dict.fromkeys(rule.refines_ids)),
             exception_to_ids=tuple(dict.fromkeys(rule.exception_to_ids)),
             conflicts_with_ids=tuple(dict.fromkeys(rule.conflicts_with_ids)),

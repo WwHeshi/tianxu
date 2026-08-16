@@ -38,7 +38,7 @@ RULE_GRAPH_QUERY_TOOL_DESCRIPTION = (
     "关系方向：Rule-[:HAS_CONDITION_GROUP]->ConditionGroup，ConditionGroup-[:REQUIRES|EXCLUDES]"
     "->Condition，Rule-[:RELATES_TO]->Concept，Rule-[:PRODUCES|DOES_NOT_PROVE]->Outcome，"
     "Condition-[:STRENGTHENS|WEAKENS]->Rule，Rule-[:SOURCED_FROM]->Source，Rule 之间可用"
-    " EQUIVALENT_TO、REFINES、EXCEPTION_TO、CONTRADICTS。只允许读取；数据库过程、外部文件"
+    " REFINES、EXCEPTION_TO、CONTRADICTS。只允许读取；数据库过程、外部文件"
     "和修改语句会被拒绝。结果超过 100 行或内容过大时应使用 WHERE、SKIP、LIMIT 或减少字段。"
 )
 
@@ -104,7 +104,7 @@ class SearchRuleGraphRelatedRule(BaseModel):
     id: str
     name: str
     summary: str
-    relation: Literal["EQUIVALENT_TO", "REFINES", "EXCEPTION_TO", "CONTRADICTS"]
+    relation: Literal["REFINES", "EXCEPTION_TO", "CONTRADICTS"]
     direction: Literal["outgoing", "incoming"]
 
 
@@ -323,7 +323,7 @@ def _project_search_rule(
         )
 
     related_rules: list[SearchRuleGraphRelatedRule] = []
-    rule_relationships = {"EQUIVALENT_TO", "REFINES", "EXCEPTION_TO", "CONTRADICTS"}
+    rule_relationships = {"REFINES", "EXCEPTION_TO", "CONTRADICTS"}
     for relationship in relationships:
         if relationship.kind not in rule_relationships:
             continue

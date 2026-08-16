@@ -62,7 +62,6 @@ const RELATION_LABELS: Record<string, string> = {
   WEAKENS: "削弱",
   PRODUCES: "产生结论",
   DOES_NOT_PROVE: "不能证明",
-  EQUIVALENT_TO: "含义等同",
   REFINES: "细化",
   EXCEPTION_TO: "例外于",
   CONTRADICTS: "冲突",

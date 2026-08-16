@@ -113,7 +113,6 @@ class GraphRuleMutation:
     weakened_by: tuple[str, ...]
     outcomes: tuple[str, ...]
     does_not_prove: tuple[str, ...]
-    equivalent_to_ids: tuple[str, ...]
     refines_ids: tuple[str, ...]
     exception_to_ids: tuple[str, ...]
     conflicts_with_ids: tuple[str, ...]
@@ -709,7 +708,6 @@ class GraphStore:
             + len(rule.weakened_by)
             + len(rule.outcomes)
             + len(rule.does_not_prove)
-            + len(rule.equivalent_to_ids)
             + len(rule.refines_ids)
             + len(rule.exception_to_ids)
             + len(rule.conflicts_with_ids)
@@ -835,7 +833,6 @@ class GraphStore:
                     await result.consume()
 
         rule_relations = (
-            ("EQUIVALENT_TO", rule.equivalent_to_ids),
             ("REFINES", rule.refines_ids),
             ("EXCEPTION_TO", rule.exception_to_ids),
             ("CONTRADICTS", rule.conflicts_with_ids),

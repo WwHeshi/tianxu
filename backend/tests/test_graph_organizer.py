@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from app.agent_capabilities import AgentCapabilityOutputError
-from app.agent_tools import AgentToolRegistry
+from app.agent_tools import AgentToolInputError, AgentToolRegistry
 from app.graph_organizer import (
     GRAPH_ORGANIZER_INSTRUCTIONS,
     DocumentSection,
@@ -183,6 +183,7 @@ def test_merge_records_section_range_and_uses_existing_rule_alias() -> None:
     extraction = GraphExtractionOutput(
         rules=[
             extracted_rule(
+                existing_rule_id="R-existing",
                 aliases=["财星有根", "财星有根"],
                 concepts=["财星", "财星"],
                 rule_links=[
@@ -221,6 +222,32 @@ def test_new_rule_uses_stable_id_deterministically() -> None:
     assert first == second
 
 
+def test_merge_rejects_an_unknown_explicit_rule_id() -> None:
+    section = DocumentSection(index=0, start=0, end=10, text="财星得地。")
+    extraction = GraphExtractionOutput(
+        rules=[extracted_rule(existing_rule_id="R-missing")]
+    )
+
+    with pytest.raises(AgentToolInputError, match="R-missing.*不存在"):
+        merge_graph_extractions(((section, extraction),), ())
+
+
+def test_merge_requires_an_explicit_id_for_an_exact_name_or_alias() -> None:
+    section = DocumentSection(index=0, start=0, end=10, text="财星得地。")
+    existing = GraphRuleSummary(
+        id="R-existing",
+        name="财星有根",
+        summary="已有摘要",
+        aliases=("财星得地",),
+        concepts=("财星",),
+        outcomes=("财运稳定",),
+    )
+    extraction = GraphExtractionOutput(rules=[extracted_rule()])
+
+    with pytest.raises(AgentToolInputError, match="R-existing.*明确填写对应编号"):
+        merge_graph_extractions(((section, extraction),), (existing,))
+
+
 def test_merge_maps_rule_links_to_internal_relationships() -> None:
     text = "财星得地，财有根基。"
     section = DocumentSection(index=0, start=0, end=len(text), text=text)
@@ -254,7 +281,6 @@ def test_merge_maps_rule_links_to_internal_relationships() -> None:
 
     mutation = merge_graph_extractions(((section, extraction),), existing_rules)[0]
 
-    assert mutation.equivalent_to_ids == ()
     assert mutation.refines_ids == ("R-refined",)
     assert mutation.exception_to_ids == ("R-exception",)
     assert mutation.conflicts_with_ids == ("R-conflict",)
@@ -385,7 +411,9 @@ async def test_graph_capability_searches_live_then_writes_through_submit_tool() 
         "(condition:Condition) RETURN rule.name AS rule, condition.name AS condition"
     ]
 
-    submission = GraphExtractionOutput(rules=[extracted_rule()])
+    submission = GraphExtractionOutput(
+        rules=[extracted_rule(existing_rule_id="R-wealth")]
+    )
     receipt = await tools["submit_rule_graph"].execute(submission)
     assert receipt.model_dump() == {"created": 0, "merged": 1}
     assert store.list_calls == 2
@@ -483,6 +511,41 @@ async def test_query_rule_graph_returns_read_query_errors_to_the_agent() -> None
     assert dispatched.input == {"cypher": "MATCH (node) DELETE node"}
     assert "只允许执行读取" in dispatched.output["error"]
     assert "重新调用 query_rule_graph" in dispatched.output["error"]
+
+
+@pytest.mark.asyncio
+async def test_submit_returns_an_explicit_merge_error_and_accepts_the_retry() -> None:
+    existing = GraphRuleSummary(
+        id="R-existing",
+        name="财星有根",
+        summary="财星得地时较稳定",
+        aliases=("财星得地",),
+        concepts=("财星",),
+        outcomes=("财运稳定",),
+    )
+    store = FakeLiveGraphStore(rules=(existing,))
+    capability = GraphOrganizerCapability(organizer_context(store))
+    registry = AgentToolRegistry(capability.tools())
+
+    rejected = await registry.dispatch_async(
+        "submit_rule_graph",
+        GraphExtractionOutput(rules=[extracted_rule()]).model_dump_json(),
+    )
+
+    assert rejected.terminal is False
+    assert "发现同名或同别名规则" in rejected.output["error"]
+    assert "R-existing" in rejected.output["error"]
+    assert store.apply_calls == []
+
+    accepted = await registry.dispatch_async(
+        "submit_rule_graph",
+        GraphExtractionOutput(
+            rules=[extracted_rule(existing_rule_id="R-existing")]
+        ).model_dump_json(),
+    )
+
+    assert accepted.output == {"created": 0, "merged": 1}
+    assert len(store.apply_calls) == 1
 
 
 @pytest.mark.asyncio
