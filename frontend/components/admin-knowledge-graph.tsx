@@ -583,6 +583,7 @@ export function AdminKnowledgeGraph() {
       admin={admin}
       isLoading={isGuardLoading || isLoading}
       loadingText="正在读取规则图谱"
+      sectionTitle="规则图谱"
       error={guardError}
       pageClassName="graph-page"
       layoutClassName="graph-layout"

@@ -124,6 +124,7 @@ export function AdminUsers() {
       admin={admin}
       isLoading={isGuardLoading || isLoading}
       loadingText="正在读取用户"
+      sectionTitle="用户管理"
       error={guardError}
       pageClassName="admin-users-page"
     >

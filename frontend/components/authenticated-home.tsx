@@ -1,11 +1,11 @@
 "use client";
 
 import { AuthenticatedPageState } from "@/components/authenticated-page-state";
-import { BaziWorkbench } from "@/components/bazi-workbench";
+import { HomeDashboard } from "@/components/home-dashboard";
 import { useAuthenticatedUser } from "@/hooks/use-authenticated-user";
 
-export function AuthenticatedWorkbench() {
+export function AuthenticatedHome() {
   const { user, error, onLogout } = useAuthenticatedUser();
   if (!user) return <AuthenticatedPageState error={error} />;
-  return <BaziWorkbench currentUser={user} onLogout={onLogout} />;
+  return <HomeDashboard currentUser={user} onLogout={onLogout} />;
 }

@@ -262,6 +262,7 @@ export function AdminKnowledge() {
       admin={admin}
       isLoading={isGuardLoading || isLoading}
       loadingText="正在读取知识库"
+      sectionTitle="知识库"
       error={guardError}
       pageClassName="knowledge-page"
       layoutClassName="knowledge-layout"

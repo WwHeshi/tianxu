@@ -277,6 +277,7 @@ export function AdminEvaluations() {
       admin={admin}
       isLoading={isGuardLoading || isLoading}
       loadingText="正在读取评测配置"
+      sectionTitle="评测中心"
       error={guardError}
       pageClassName="evaluation-page"
       layoutClassName="evaluation-layout"

@@ -2,11 +2,9 @@
 
 import {
   AlertCircle,
-  ArrowLeft,
   Bot,
   Clock3,
   LoaderCircle,
-  LogOut,
   MessageCircle,
   Plus,
   Send,
@@ -15,13 +13,13 @@ import {
   UserRound,
   Workflow,
 } from "lucide-react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { AgentDebugModal } from "@/components/agent-debug-modal";
+import { AppHeader } from "@/components/app-header";
 import {
   ApiError,
   createAgentConversation,
@@ -334,21 +332,12 @@ export function ChatWorkspace() {
 
   return (
     <main className="chat-page">
-      <header className="chat-topbar">
-        <Link href="/" className="chat-back"><ArrowLeft size={16} />返回排盘</Link>
-        <div className="brand-lockup" aria-label="天序命理对话">
-          <span className="brand-mark"><MessageCircle size={17} /></span>
-          <span className="brand-name">天序</span>
-          <span className="brand-divider" />
-          <span className="brand-section">命理对话</span>
-        </div>
-        <div className="chat-user">
-          <span>{user.display_name}</span>
-          <button type="button" onClick={() => void handleLogout()} aria-label="退出登录">
-            <LogOut size={16} />
-          </button>
-        </div>
-      </header>
+      <AppHeader
+        currentUser={user}
+        section="命理对话"
+        onLogout={() => void handleLogout()}
+        wide
+      />
 
       <div className="chat-layout">
         <aside className="chat-sidebar">

@@ -2,33 +2,31 @@
 
 import {
   AlertCircle,
-  ArrowLeft,
   LoaderCircle,
-  LogOut,
-  ShieldCheck,
 } from "lucide-react";
-import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { AppHeader } from "@/components/app-header";
 import { logout } from "@/lib/api";
 import type { CurrentUser } from "@/lib/types";
 
 interface AdminTopbarProps {
   admin: CurrentUser;
+  sectionTitle: string;
 }
 
-export function AdminTopbar({ admin }: AdminTopbarProps) {
+export function AdminTopbar({ admin, sectionTitle }: AdminTopbarProps) {
   async function handleLogout() {
     await logout().catch(() => undefined);
     window.location.replace("/login");
   }
 
   return (
-    <header className="admin-topbar">
-      <Link href="/" className="admin-back"><ArrowLeft size={16} />返回排盘</Link>
-      <div><ShieldCheck size={17} /><span>{admin.display_name}</span></div>
-      <button type="button" onClick={() => void handleLogout()}><LogOut size={16} />退出</button>
-    </header>
+    <AppHeader
+      currentUser={admin}
+      section={sectionTitle}
+      onLogout={() => void handleLogout()}
+    />
   );
 }
 
@@ -36,6 +34,7 @@ interface AdminShellProps {
   admin: CurrentUser | null;
   isLoading: boolean;
   loadingText: string;
+  sectionTitle: string;
   error?: string;
   pageClassName?: string;
   layoutClassName?: string;
@@ -47,6 +46,7 @@ export function AdminShell({
   admin,
   isLoading,
   loadingText,
+  sectionTitle,
   error = "",
   pageClassName = "",
   layoutClassName = "",
@@ -76,7 +76,7 @@ export function AdminShell({
 
   return (
     <main className={pageClasses}>
-      <AdminTopbar admin={admin} />
+      <AdminTopbar admin={admin} sectionTitle={sectionTitle} />
       <div className={layoutClasses}>{children}</div>
       {overlay}
     </main>
