@@ -23,7 +23,6 @@ async def client() -> AsyncIterator[AsyncClient]:
         password_hash="unused",
         role="admin",
         status="active",
-        must_change_password=False,
     )
     app.dependency_overrides[get_current_user] = lambda: test_admin
     transport = ASGITransport(app=app)

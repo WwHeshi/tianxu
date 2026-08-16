@@ -23,10 +23,6 @@ export function useAdminGuard(): AdminGuardState {
       try {
         const user = await getCurrentUser();
         if (!active) return;
-        if (user.must_change_password) {
-          window.location.replace("/change-password");
-          return;
-        }
         if (user.role !== "admin") {
           window.location.replace("/");
           return;

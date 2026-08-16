@@ -54,7 +54,7 @@ export function ChangePasswordForm() {
         <div className="auth-brand"><Sparkles size={18} /><span>天序</span></div>
         <p className="eyebrow">PASSWORD UPDATE</p>
         <h1 id="password-title">设置新密码</h1>
-        <p className="auth-intro">首次登录必须替换管理员分配的临时密码。</p>
+        <p className="auth-intro">验证当前密码后，可以为账户设置新密码。</p>
         <form onSubmit={handleSubmit}>
           {[
             ["当前密码", currentPassword, setCurrentPassword, "current-password"],

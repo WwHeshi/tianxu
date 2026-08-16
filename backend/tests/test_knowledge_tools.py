@@ -122,6 +122,8 @@ def test_capability_binds_prompt_tools_and_finalizer() -> None:
     )
 
     assert "D001《滴天髓阐微》" in capability.prompt_section()
+    assert "search_knowledge 用于定位书籍原文" in capability.prompt_section()
+    assert "read_knowledge 用于阅读命中位置的上下文" in capability.prompt_section()
     assert "limit" not in capability.tools()[0].input_schema["properties"]
     assert "cursor" not in capability.tools()[0].input_schema["properties"]
     result = capability.finalize(json.dumps({"answer": "依据已读取的资料判断。"}))

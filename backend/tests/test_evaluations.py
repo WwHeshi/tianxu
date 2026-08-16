@@ -40,7 +40,6 @@ async def _create_admin(
             display_name="评测管理员",
             password_hash=hash_password("admin-password"),
             role="admin",
-            must_change_password=False,
         )
 
 
@@ -625,7 +624,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v11-rule-graph",
+            prompt_version="mingli-eval-v12-graph-first",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,

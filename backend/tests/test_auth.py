@@ -13,7 +13,6 @@ async def create_account(
     username: str,
     password: str,
     role: str,
-    must_change_password: bool = False,
 ) -> UUID:
     async with session_factory() as session:
         user = await AuthRepository(session).create_user(
@@ -21,7 +20,6 @@ async def create_account(
             display_name=username,
             password_hash=hash_password(password),
             role=role,
-            must_change_password=must_change_password,
         )
         return user.id
 
@@ -71,7 +69,6 @@ async def test_first_visit_can_bootstrap_exactly_one_administrator(
     assert before.json() == {"required": True}
     assert created.status_code == 201
     assert created.json()["user"]["role"] == "admin"
-    assert created.json()["user"]["must_change_password"] is False
     assert me.status_code == 200
     assert after.json() == {"required": False}
     assert repeated.status_code == 409
@@ -107,7 +104,7 @@ async def test_login_me_and_logout_use_revocable_http_only_cookie(
 
 
 @pytest.mark.asyncio
-async def test_admin_creates_user_and_temporary_password_must_be_changed(
+async def test_admin_creates_user_with_immediately_usable_password(
     database_client: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
 ) -> None:
     client, session_factory = database_client
@@ -126,7 +123,7 @@ async def test_admin_creates_user_and_temporary_password_must_be_changed(
         json={
             "username": "reader",
             "display_name": "普通用户",
-            "temporary_password": "temp1234",
+            "password": "temp1234",
             "role": "user",
         },
     )
@@ -136,17 +133,6 @@ async def test_admin_creates_user_and_temporary_password_must_be_changed(
         "/api/v1/auth/login",
         json={"username": "reader", "password": "temp1234"},
     )
-    blocked = await client.post(
-        "/api/v1/charts/preview",
-        json={"beijing_datetime": "1990-01-01T12:00:00", "gender": "male"},
-    )
-    changed = await client.post(
-        "/api/v1/auth/change-password",
-        json={
-            "current_password": "temp1234",
-            "new_password": "newpass8",
-        },
-    )
     chart = await client.post(
         "/api/v1/charts/preview",
         json={"beijing_datetime": "1990-01-01T12:00:00", "gender": "male"},
@@ -155,10 +141,7 @@ async def test_admin_creates_user_and_temporary_password_must_be_changed(
     model_settings = await client.get("/api/v1/model-settings")
 
     assert created.status_code == 201
-    assert login.json()["user"]["must_change_password"] is True
-    assert blocked.status_code == 403
-    assert changed.status_code == 200
-    assert changed.json()["must_change_password"] is False
+    assert login.status_code == 200
     assert chart.status_code == 200
     assert admin_list.status_code == 403
     assert model_settings.status_code == 403
@@ -205,7 +188,6 @@ async def test_admin_password_reset_sets_permanent_password(
         username="reader",
         password="original-password",
         role="user",
-        must_change_password=True,
     )
     await client.post(
         "/api/v1/auth/login",
@@ -228,7 +210,6 @@ async def test_admin_password_reset_sets_permanent_password(
 
     assert reset.status_code == 204
     assert login.status_code == 200
-    assert login.json()["user"]["must_change_password"] is False
     assert chart.status_code == 200
 
 

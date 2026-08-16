@@ -32,7 +32,6 @@ async def create_admin(username: str, display_name: str) -> None:
             display_name=normalized_display_name,
             password_hash=hash_password(password),
             role="admin",
-            must_change_password=False,
         )
         await repository.mark_bootstrap_completed()
         await repository.add_audit_log(

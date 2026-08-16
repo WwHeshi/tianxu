@@ -7,10 +7,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..agent_tools import AgentTool
+from ..agent_tools import AgentTool, AgentToolAuthorizationError
 from ..schemas import BirthInput, FortunePillar, Gender
 from .engine import calculate_chart
 from .fortune import FortuneAtSelection, select_fortune_at
+from .tool import BaziChartToolInput
 
 FORTUNE_AT_TOOL_NAME = "calculate_fortune_at"
 FORTUNE_AT_TOOL_DESCRIPTION = (
@@ -174,8 +175,10 @@ def run_fortune_at_tool(
     return _tool_result(select_fortune_at(cycles, payload.as_of_datetime))
 
 
-def fortune_at_agent_tool() -> AgentTool:
-    """Register the self-contained point-in-time fortune tool."""
+def fortune_at_agent_tool(
+    expected_birth: BaziChartToolInput | None = None,
+) -> AgentTool:
+    """Register the point-in-time fortune tool, optionally bound to one chart."""
 
     definition = fortune_at_tool_definition()
 
@@ -184,10 +187,22 @@ def fortune_at_agent_tool() -> AgentTool:
             raise TypeError("calculate_fortune_at received an unexpected input model")
         return run_fortune_at_tool(payload)
 
+    def authorize(payload: BaseModel) -> None:
+        if expected_birth is None:
+            return
+        if not isinstance(payload, FortuneAtToolInput):  # pragma: no cover - registry invariant
+            raise TypeError("calculate_fortune_at received an unexpected input model")
+        if (
+            payload.gender != expected_birth.gender
+            or payload.true_solar_datetime != expected_birth.true_solar_datetime
+        ):
+            raise AgentToolAuthorizationError("模型擅自修改了命盘出生资料，已拒绝执行。")
+
     return AgentTool(
         name=definition["name"],
         description=definition["description"],
         input_schema=definition["input_schema"],
         input_model=FortuneAtToolInput,
         execute=execute,
+        authorize=authorize,
     )

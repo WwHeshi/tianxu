@@ -110,7 +110,6 @@ class AuthRepository:
         display_name: str,
         password_hash: str,
         role: str,
-        must_change_password: bool = True,
     ) -> User:
         user = User(
             username=normalize_username(username),
@@ -118,7 +117,6 @@ class AuthRepository:
             password_hash=password_hash,
             role=role,
             status="active",
-            must_change_password=must_change_password,
         )
         self.session.add(user)
         await self.session.commit()
@@ -166,7 +164,6 @@ class AuthRepository:
             password_hash=password_hash,
             role="admin",
             status="active",
-            must_change_password=False,
             last_login_at=now,
         )
         self.session.add(user)
@@ -272,7 +269,6 @@ class AuthRepository:
         keep_token_digest: str | None = None,
     ) -> None:
         user.password_hash = password_hash
-        user.must_change_password = False
         await self.session.commit()
         await self.revoke_user_sessions(user.id, except_digest=keep_token_digest)
         await self.session.refresh(user)
@@ -381,15 +377,7 @@ async def get_current_user(
 
 
 CurrentUserDependency = Annotated[User, Depends(get_current_user)]
-
-
-def require_password_changed(user: CurrentUserDependency) -> User:
-    if user.must_change_password:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="请先修改临时密码")
-    return user
-
-
-ReadyUserDependency = Annotated[User, Depends(require_password_changed)]
+ReadyUserDependency = CurrentUserDependency
 
 
 def require_admin(user: ReadyUserDependency) -> User:

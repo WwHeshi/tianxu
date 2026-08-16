@@ -9,6 +9,7 @@ from .knowledge_tools import KnowledgeToolSession
 KNOWLEDGE_CAPABILITY_NAME = "knowledge"
 
 KNOWLEDGE_INSTRUCTIONS = """知识库能力已启用。
+search_knowledge 用于定位书籍原文，read_knowledge 用于阅读命中位置的上下文。
 需要用资料支持判断时，必须遵守：
 1. 使用 search_knowledge 一次提交 1 至 6 个相关术语或短语，查看最多 5 条定位结果。
 2. 只有通过本次提供的知识库工具实际搜索并使用 read_knowledge 阅读过的资料才可以采用；

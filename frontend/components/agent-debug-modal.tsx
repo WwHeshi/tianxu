@@ -92,11 +92,12 @@ function responsesHistory(modelCalls: DebugModelCall[]): HistoryItem[] {
 
   for (const [index, value] of asArray(firstRequest.input).entries()) {
     const input = asRecord(value);
-    if (!input || input.role !== "user") continue;
+    if (!input || (input.role !== "user" && input.role !== "assistant")) continue;
+    const role = input.role as "user" | "assistant";
     items.push({
-      id: `responses-user-${index}`,
-      role: "user",
-      label: "User",
+      id: `responses-${role}-${index}`,
+      role,
+      label: ROLE_LABELS[role],
       source: "请求体 1",
       content: visibleContent(input.content),
     });
@@ -215,8 +216,11 @@ function chatHistory(modelCalls: DebugModelCall[]): HistoryItem[] {
   const initialMessages = asArray(modelCalls[0].request_body.messages);
   for (const [index, rawMessage] of initialMessages.entries()) {
     const message = asRecord(rawMessage);
-    if (!message || (message.role !== "system" && message.role !== "user")) continue;
-    const role = message.role as "system" | "user";
+    if (
+      !message
+      || !["system", "user", "assistant"].includes(String(message.role))
+    ) continue;
+    const role = message.role as "system" | "user" | "assistant";
     items.push({
       id: `chat-${role}-${index}`,
       role,

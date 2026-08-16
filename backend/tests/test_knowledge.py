@@ -22,7 +22,6 @@ async def create_account(
             display_name=username,
             password_hash=hash_password("test-password"),
             role=role,
-            must_change_password=False,
         )
         return user.id
 

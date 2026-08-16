@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from time import perf_counter
@@ -25,6 +25,18 @@ from .agent_tools import (
 )
 
 ApiProtocol = Literal["responses", "chat_completions"]
+ConversationHistory = Iterable[dict[str, str]]
+StreamEventType = Literal["output_delta", "output_reset", "tool_started", "tool_completed"]
+
+
+@dataclass(frozen=True)
+class ToolCallingStreamEvent:
+    type: StreamEventType
+    text: str | None = None
+    tool_name: str | None = None
+
+
+AgentStreamCallback = Callable[[ToolCallingStreamEvent], Awaitable[None] | None]
 
 
 class ToolCallProtocolError(RuntimeError):
@@ -220,6 +232,266 @@ def _response_payload(response: httpx.Response) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"response_body": payload}
 
 
+async def _emit_stream_event(
+    callback: AgentStreamCallback | None,
+    event: ToolCallingStreamEvent,
+) -> None:
+    if callback is None:
+        return
+    pending = callback(event)
+    if pending is not None:
+        await pending
+
+
+def _stream_json(line: str) -> dict[str, Any] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("event:") or stripped.startswith(":"):
+        return None
+    if stripped.startswith("data:"):
+        stripped = stripped[5:].strip()
+    if not stripped or stripped == "[DONE]":
+        return None
+    try:
+        value = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _visible_output_delta(delta: str, *, emitted_text: bool) -> str:
+    """Drop whitespace only at the beginning of one model response."""
+
+    return delta if emitted_text else delta.lstrip()
+
+
+async def _responses_stream_payload(
+    response: httpx.Response,
+    callback: AgentStreamCallback,
+) -> tuple[dict[str, Any], bool]:
+    completed: dict[str, Any] | None = None
+    items: dict[int, dict[str, Any]] = {}
+    text_parts: dict[int, list[str]] = {}
+    argument_parts: dict[int, list[str]] = {}
+    emitted_text = False
+    stream_error: str | None = None
+
+    async for line in response.aiter_lines():
+        event = _stream_json(line)
+        if event is None:
+            continue
+        if isinstance(event.get("output"), list) and "type" not in event:
+            completed = event
+            continue
+
+        event_type = event.get("type")
+        if event_type in {"response.completed", "response.failed", "response.incomplete"}:
+            candidate = event.get("response")
+            if isinstance(candidate, dict):
+                completed = candidate
+            continue
+        if event_type == "error":
+            error = event.get("error")
+            if isinstance(error, dict):
+                stream_error = str(error.get("message") or error)
+            else:
+                stream_error = str(event.get("message") or error or "模型流式响应失败")
+            continue
+
+        output_index = int(event.get("output_index") or 0)
+        if event_type in {"response.output_item.added", "response.output_item.done"}:
+            item = event.get("item")
+            if isinstance(item, dict):
+                items[output_index] = deepcopy(item)
+            continue
+        if event_type == "response.output_text.delta":
+            delta = event.get("delta")
+            if isinstance(delta, str) and delta:
+                text_parts.setdefault(output_index, []).append(delta)
+                visible_delta = _visible_output_delta(delta, emitted_text=emitted_text)
+                if visible_delta:
+                    emitted_text = True
+                    await _emit_stream_event(
+                        callback,
+                        ToolCallingStreamEvent(type="output_delta", text=visible_delta),
+                    )
+            continue
+        if event_type == "response.output_text.done":
+            text = event.get("text")
+            if isinstance(text, str) and output_index not in text_parts:
+                text_parts[output_index] = [text]
+            continue
+        if event_type == "response.function_call_arguments.delta":
+            delta = event.get("delta")
+            if isinstance(delta, str):
+                argument_parts.setdefault(output_index, []).append(delta)
+            continue
+        if event_type == "response.function_call_arguments.done":
+            arguments = event.get("arguments")
+            if isinstance(arguments, str):
+                argument_parts[output_index] = [arguments]
+
+    if completed is not None:
+        return completed, emitted_text
+    if stream_error is not None:
+        return {"stream_error": stream_error}, emitted_text
+
+    for output_index, parts in text_parts.items():
+        item = items.setdefault(output_index, {"type": "message", "role": "assistant"})
+        item["content"] = [{"type": "output_text", "text": "".join(parts)}]
+    for output_index, parts in argument_parts.items():
+        item = items.setdefault(output_index, {"type": "function_call"})
+        item["arguments"] = "".join(parts)
+    output = [items[index] for index in sorted(items)]
+    return {"output": output}, emitted_text
+
+
+async def _chat_stream_payload(
+    response: httpx.Response,
+    callback: AgentStreamCallback,
+) -> tuple[dict[str, Any], bool]:
+    response_values: dict[str, Any] = {}
+    message: dict[str, Any] = {"role": "assistant", "content": ""}
+    tool_calls: dict[int, dict[str, Any]] = {}
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
+    emitted_text = False
+    full_payload: dict[str, Any] | None = None
+    stream_error: str | None = None
+
+    async for line in response.aiter_lines():
+        chunk = _stream_json(line)
+        if chunk is None:
+            continue
+        if isinstance(chunk.get("error"), dict):
+            error = chunk["error"]
+            stream_error = str(error.get("message") or error)
+            continue
+        choices = chunk.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            if isinstance(choices[0].get("message"), dict):
+                full_payload = chunk
+                continue
+            choice = choices[0]
+            delta = choice.get("delta")
+            if isinstance(delta, dict):
+                if isinstance(delta.get("role"), str):
+                    message["role"] = delta["role"]
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    message["content"] = str(message.get("content") or "") + content
+                    visible_content = _visible_output_delta(
+                        content,
+                        emitted_text=emitted_text,
+                    )
+                    if visible_content:
+                        emitted_text = True
+                        await _emit_stream_event(
+                            callback,
+                            ToolCallingStreamEvent(
+                                type="output_delta",
+                                text=visible_content,
+                            ),
+                        )
+                for key in _CHAT_REASONING_KEYS:
+                    value = delta.get(key)
+                    if isinstance(value, str):
+                        message[key] = str(message.get(key) or "") + value
+                raw_tool_calls = delta.get("tool_calls")
+                if isinstance(raw_tool_calls, list):
+                    for raw_call in raw_tool_calls:
+                        if not isinstance(raw_call, dict):
+                            continue
+                        index = int(raw_call.get("index") or 0)
+                        call = tool_calls.setdefault(
+                            index,
+                            {
+                                "id": "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            },
+                        )
+                        if isinstance(raw_call.get("id"), str):
+                            call["id"] = raw_call["id"]
+                        if isinstance(raw_call.get("type"), str):
+                            call["type"] = raw_call["type"]
+                        function = raw_call.get("function")
+                        if isinstance(function, dict):
+                            target = call["function"]
+                            if isinstance(function.get("name"), str):
+                                target["name"] += function["name"]
+                            if isinstance(function.get("arguments"), str):
+                                target["arguments"] += function["arguments"]
+            if isinstance(choice.get("finish_reason"), str):
+                finish_reason = choice["finish_reason"]
+        if isinstance(chunk.get("usage"), dict):
+            usage = chunk["usage"]
+        for key, value in chunk.items():
+            if key not in {"choices", "usage"}:
+                response_values[key] = value
+
+    if full_payload is not None:
+        return full_payload, emitted_text
+    if stream_error is not None:
+        return {"stream_error": stream_error}, emitted_text
+    if tool_calls:
+        message["tool_calls"] = [tool_calls[index] for index in sorted(tool_calls)]
+    payload = {
+        **response_values,
+        "choices": [
+            {
+                "index": 0,
+                "message": message,
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    if usage is not None:
+        payload["usage"] = usage
+    return payload, emitted_text
+
+
+async def _post_streaming_model(
+    *,
+    client: httpx.AsyncClient,
+    endpoint: str,
+    headers: dict[str, str],
+    request_body: dict[str, Any],
+    api_protocol: ApiProtocol,
+    callback: AgentStreamCallback,
+) -> tuple[int, bool, dict[str, Any], bool]:
+    async with client.stream(
+        "POST",
+        endpoint,
+        headers=headers,
+        json=request_body,
+    ) as response:
+        if not response.is_success:
+            await response.aread()
+            return response.status_code, False, _response_payload(response), False
+        if api_protocol == "responses":
+            payload, emitted_text = await _responses_stream_payload(response, callback)
+        else:
+            payload, emitted_text = await _chat_stream_payload(response, callback)
+        return response.status_code, True, payload, emitted_text
+
+
+def _normalized_conversation_history(
+    history: ConversationHistory,
+) -> list[dict[str, str]]:
+    """Validate the small, provider-neutral history persisted by chat features."""
+
+    normalized: list[dict[str, str]] = []
+    for item in history:
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"}:
+            raise ValueError("conversation history roles must be user or assistant")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("conversation history content must not be empty")
+        normalized.append({"role": role, "content": content})
+    return normalized
+
+
 def _responses_output_text(payload: dict[str, Any]) -> str:
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct.strip():
@@ -259,12 +531,14 @@ async def run_tool_calling_agent(
     api_key: str,
     system_prompt: str,
     user_prompt: str,
+    conversation_history: ConversationHistory = (),
     output_schema_name: str | None,
     output_schema: dict[str, Any] | None,
     client: httpx.AsyncClient,
     tool_registry: AgentToolRegistry | None = None,
     capabilities: Iterable[AgentCapability] = (),
     timeout_seconds: float | None = None,
+    stream_callback: AgentStreamCallback | None = None,
 ) -> ToolCallingResult:
     """Run a tool loop with explicitly registered tools and complete capabilities."""
 
@@ -278,16 +552,21 @@ async def run_tool_calling_agent(
     tool_registry = (tool_registry or AgentToolRegistry.empty()).extended(
         capability_registry.tools()
     )
+    normalized_history = _normalized_conversation_history(conversation_history)
 
     if api_protocol == "responses":
         endpoint = f"{base_url.rstrip('/')}/responses"
-        responses_input: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
+        responses_input: list[dict[str, Any]] = [
+            *normalized_history,
+            {"role": "user", "content": user_prompt},
+        ]
         chat_messages: list[dict[str, Any]] = []
     elif api_protocol == "chat_completions":
         endpoint = f"{base_url.rstrip('/')}/chat/completions"
         responses_input = []
         chat_messages = [
             {"role": "system", "content": system_prompt},
+            *normalized_history,
             {"role": "user", "content": user_prompt},
         ]
     else:
@@ -353,6 +632,8 @@ async def run_tool_calling_agent(
                 "store": False,
                 "include": ["reasoning.encrypted_content"],
             }
+            if stream_callback is not None:
+                request_body["stream"] = True
             if output_schema_name is not None and output_schema is not None:
                 request_body["text"] = {
                     "format": {
@@ -374,7 +655,7 @@ async def run_tool_calling_agent(
             request_body = {
                 "model": model,
                 "messages": deepcopy(chat_messages),
-                "stream": False,
+                "stream": stream_callback is not None,
             }
             if tool_registry.names:
                 request_body.update(
@@ -386,27 +667,44 @@ async def run_tool_calling_agent(
                 )
         last_request_body = request_body
 
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        async def send_model_request() -> tuple[int, bool, dict[str, Any], bool]:
+            if stream_callback is not None:
+                return await _post_streaming_model(
+                    client=client,
+                    endpoint=endpoint,
+                    headers=headers,
+                    request_body=request_body,
+                    api_protocol=api_protocol,
+                    callback=stream_callback,
+                )
+            response = await client.post(
+                endpoint,
+                headers=headers,
+                json=request_body,
+            )
+            return (
+                response.status_code,
+                response.is_success,
+                _response_payload(response),
+                False,
+            )
+
         started = perf_counter()
         try:
             remaining = remaining_timeout()
             if remaining is None:
-                response = await client.post(
-                    endpoint,
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=request_body,
+                status_code, response_success, payload, streamed_text = (
+                    await send_model_request()
                 )
             else:
                 async with asyncio.timeout(remaining):
-                    response = await client.post(
-                        endpoint,
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json=request_body,
+                    status_code, response_success, payload, streamed_text = (
+                        await send_model_request()
                     )
         except TimeoutError as exc:
             total_latency_ms += round((perf_counter() - started) * 1000)
@@ -428,15 +726,13 @@ async def run_tool_calling_agent(
 
         latency_ms = round((perf_counter() - started) * 1000)
         total_latency_ms += latency_ms
-        status_code = response.status_code
-        payload = _response_payload(response)
         last_payload = payload
         last_status_code = status_code
         input_tokens, output_tokens = _usage(payload, api_protocol)
         total_input_tokens += input_tokens
         total_output_tokens += output_tokens
 
-        if not response.is_success:
+        if not response_success:
             model_calls.append(
                 ToolCallingModelCall(
                     stage="error",
@@ -462,6 +758,19 @@ async def run_tool_calling_agent(
                 retryable=retryable,
                 fatal=fatal,
             )
+
+        stream_error = payload.get("stream_error")
+        if isinstance(stream_error, str):
+            model_calls.append(
+                ToolCallingModelCall(
+                    stage="error",
+                    request_body=request_body,
+                    raw_response=payload,
+                    latency_ms=latency_ms,
+                    status_code=status_code,
+                )
+            )
+            raise run_error(stream_error, provider_error=True, retryable=True)
 
         try:
             requested_calls = (
@@ -494,6 +803,10 @@ async def run_tool_calling_agent(
         )
 
         if requested_calls:
+            await _emit_stream_event(
+                stream_callback,
+                ToolCallingStreamEvent(type="output_reset"),
+            )
             terminal_requested = [
                 requested_call
                 for requested_call in requested_calls
@@ -504,6 +817,13 @@ async def run_tool_calling_agent(
 
             dispatched_calls = []
             for requested_call in requested_calls:
+                await _emit_stream_event(
+                    stream_callback,
+                    ToolCallingStreamEvent(
+                        type="tool_started",
+                        tool_name=requested_call.name,
+                    ),
+                )
                 tool_started = perf_counter()
                 try:
                     remaining = remaining_timeout()
@@ -530,6 +850,13 @@ async def run_tool_calling_agent(
                         output=dispatched.output,
                         duration_ms=tool_duration_ms,
                     )
+                )
+                await _emit_stream_event(
+                    stream_callback,
+                    ToolCallingStreamEvent(
+                        type="tool_completed",
+                        tool_name=dispatched.name,
+                    ),
                 )
                 dispatched_calls.append((requested_call, dispatched))
 
@@ -592,9 +919,15 @@ async def run_tool_calling_agent(
                 _responses_output_text(payload)
                 if api_protocol == "responses"
                 else _chat_output_text(payload)
-            )
+            ).lstrip()
         except ToolCallProtocolError as exc:
             raise run_error(str(exc)) from exc
+
+        if stream_callback is not None and not streamed_text:
+            await _emit_stream_event(
+                stream_callback,
+                ToolCallingStreamEvent(type="output_delta", text=output_text),
+            )
 
         try:
             capability_results = capability_registry.finalize(output_text)

@@ -149,7 +149,6 @@ def admin_user() -> User:
         password_hash="unused",
         role="admin",
         status="active",
-        must_change_password=False,
     )
 
 

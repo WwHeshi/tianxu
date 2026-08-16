@@ -41,6 +41,9 @@ async def test_rule_graph_capability_registers_only_live_read_tools() -> None:
     assert registry.apply_prompt("基础提示词") == (
         "基础提示词\n\n" + RULE_GRAPH_INSTRUCTIONS
     )
+    assert "优先使用 search_rule_graph" in capability.prompt_section()
+    assert "search_knowledge 定位原文" in capability.prompt_section()
+    assert "read_knowledge 阅读" in capability.prompt_section()
     assert tools["query_rule_graph"].description == RULE_GRAPH_QUERY_TOOL_DESCRIPTION
     assert "Rule-[:HAS_CONDITION_GROUP]->ConditionGroup" in (
         tools["query_rule_graph"].description

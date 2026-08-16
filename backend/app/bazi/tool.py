@@ -175,16 +175,16 @@ def run_bazi_chart_tool(payload: BaziChartToolInput) -> BaziChartToolResult:
 
 
 def bazi_chart_agent_tool(
-    expected_input: BaziChartToolInput,
+    expected_input: BaziChartToolInput | None = None,
     *,
     execute_tool: Callable[[BaziChartToolInput], BaziChartToolResult] = run_bazi_chart_tool,
 ) -> AgentTool:
-    """Bind the authoritative birth input for one Agent invocation."""
+    """Register chart calculation, optionally bound to one authoritative birth input."""
 
     definition = bazi_chart_tool_definition()
 
     def authorize(payload: BaseModel) -> None:
-        if payload != expected_input:
+        if expected_input is not None and payload != expected_input:
             raise AgentToolAuthorizationError("模型擅自修改了排盘工具参数，已拒绝执行。")
 
     def execute(payload: BaseModel) -> BaseModel:

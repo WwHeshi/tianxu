@@ -15,6 +15,7 @@ import {
   LogOut,
   MapPin,
   Network,
+  MessageCircle,
   PlugZap,
   RotateCcw,
   Settings,
@@ -30,6 +31,7 @@ import Link from "next/link";
 import { AgentDebugModal as SharedAgentDebugModal } from "@/components/agent-debug-modal";
 import {
   deleteModelSettings,
+  createAgentConversation,
   generateReport,
   getModelSettings,
   previewChart,
@@ -188,6 +190,8 @@ export function BaziWorkbench({
   const [lastRequest, setLastRequest] = useState<ChartPreviewRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelSettings, setModelSettings] = useState<ModelSettings | null>(null);
+  const [isStartingChat, setIsStartingChat] = useState(false);
+  const [chatError, setChatError] = useState("");
 
   useEffect(() => {
     if (currentUser.role !== "admin") return;
@@ -303,6 +307,22 @@ export function BaziWorkbench({
     setError("");
     setFormError("");
     setLastRequest(null);
+    setChatError("");
+  }
+
+  async function startChartConversation() {
+    if (!lastRequest || isStartingChat) return;
+    setChatError("");
+    setIsStartingChat(true);
+    try {
+      const conversation = await createAgentConversation(lastRequest);
+      window.location.assign(`/chat/${conversation.id}`);
+    } catch (requestError) {
+      setChatError(
+        requestError instanceof Error ? requestError.message : "无法创建命盘对话，请稍后重试。",
+      );
+      setIsStartingChat(false);
+    }
   }
 
   return (
@@ -315,6 +335,10 @@ export function BaziWorkbench({
           <span className="brand-section">八字排盘</span>
         </div>
         <div className="topbar-actions">
+          <Link className="settings-button" href="/chat">
+            <MessageCircle size={16} aria-hidden="true" />
+            <span>命理对话</span>
+          </Link>
           {currentUser.role === "admin" && (
             <>
               <Link className="settings-button" href="/admin/knowledge">
@@ -509,6 +533,9 @@ export function BaziWorkbench({
               onOpenSettings={
                 currentUser.role === "admin" ? () => setSettingsOpen(true) : undefined
               }
+              onStartChat={() => void startChartConversation()}
+              isStartingChat={isStartingChat}
+              chatError={chatError}
             />
           )}
         </section>
@@ -1309,10 +1336,16 @@ function ChartResult({
   chart,
   request,
   onOpenSettings,
+  onStartChat,
+  isStartingChat,
+  chatError,
 }: {
   chart: ChartPreview;
   request: ChartPreviewRequest;
   onOpenSettings?: () => void;
+  onStartChat: () => void;
+  isStartingChat: boolean;
+  chatError: string;
 }) {
   const calendar = chart.chart?.calendar;
   const normalized = chart.normalized_input ?? {};
@@ -1481,6 +1514,19 @@ function ChartResult({
           <div><strong>计算提示</strong><ul>{warnings.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></div>
         </aside>
       )}
+
+      <section className="chart-chat-entry" aria-labelledby="chart-chat-title">
+        <span><MessageCircle size={20} aria-hidden="true" /></span>
+        <div>
+          <h3 id="chart-chat-title">继续问这张命盘</h3>
+          <p>命盘会绑定到新对话中，可以连续追问事业、关系和具体年份。</p>
+          {chatError && <small role="alert">{chatError}</small>}
+        </div>
+        <button type="button" onClick={onStartChat} disabled={isStartingChat}>
+          {isStartingChat ? <LoaderCircle className="spin" size={16} /> : <MessageCircle size={16} />}
+          {isStartingChat ? "正在创建" : "就此命盘提问"}
+        </button>
+      </section>
 
       <ReportGenerator request={request} onOpenSettings={onOpenSettings} />
     </div>

@@ -15,10 +15,6 @@ export function AuthenticatedWorkbench() {
     void getCurrentUser()
       .then((current) => {
         if (!active) return;
-        if (current.must_change_password) {
-          window.location.replace("/change-password");
-          return;
-        }
         setUser(current);
       })
       .catch((requestError) => {

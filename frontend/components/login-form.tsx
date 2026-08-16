@@ -18,8 +18,8 @@ export function LoginForm() {
           window.location.replace("/setup");
           return;
         }
-        const user = await getCurrentUser();
-        window.location.replace(user.must_change_password ? "/change-password" : "/");
+        await getCurrentUser();
+        window.location.replace("/");
       } catch (requestError) {
         if (!(requestError instanceof ApiError) || requestError.status !== 401) {
           setError(requestError instanceof Error ? requestError.message : "无法连接登录服务。");
@@ -37,8 +37,8 @@ export function LoginForm() {
     }
     setIsSubmitting(true);
     try {
-      const result = await login(username.trim(), password);
-      window.location.replace(result.user.must_change_password ? "/change-password" : "/");
+      await login(username.trim(), password);
+      window.location.replace("/");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "登录失败，请稍后重试。");
     } finally {

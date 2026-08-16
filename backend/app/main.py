@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from .api.admin_routes import router as admin_router
 from .api.auth_routes import router as auth_router
+from .api.chat_routes import router as chat_router
 from .api.evaluation_routes import router as evaluation_router
 from .api.graph_routes import router as graph_router
 from .api.knowledge_routes import router as knowledge_router
@@ -83,6 +84,7 @@ async def require_trusted_origin_for_session_requests(request: Request, call_nex
 
 app.include_router(router)
 app.include_router(auth_router)
+app.include_router(chat_router)
 app.include_router(admin_router)
 app.include_router(evaluation_router)
 app.include_router(graph_router)

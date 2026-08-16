@@ -96,6 +96,7 @@ services:
     volumes:
       - ./frontend/app:/app/app
       - ./frontend/components:/app/components
+      - ./frontend/hooks:/app/hooks
       - ./frontend/lib:/app/lib
       - ./frontend/public:/app/public
     command: ["npm", "run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000"]

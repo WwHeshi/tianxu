@@ -21,11 +21,11 @@ from .graph_store import (
 
 RULE_GRAPH_CAPABILITY_NAME = "rule_graph_read"
 
-RULE_GRAPH_INSTRUCTIONS = (
-    "规则图谱能力已启用。优先使用 search_rule_graph 查找相关规则；需要自定义路径、多层关系或"
-    "聚合时使用 query_rule_graph。图谱用于读取结构化规则；需要核对书籍原文时继续使用知识库"
-    "工具。"
-)
+RULE_GRAPH_INSTRUCTIONS = """规则图谱能力已启用。
+涉及格局、旺衰、十神、组合、流年应事等命理判断时，优先使用 search_rule_graph 搜索相关规则，
+并结合返回的适用条件和结论进行分析；需要自定义路径、多层关系或聚合时使用 query_rule_graph。
+图谱用于查找结构化规则。需要查看、核对或引用书籍原文时，如果本次提供了知识库工具，先使用
+search_knowledge 定位原文，再使用 read_knowledge 阅读命中位置的上下文。"""
 
 RULE_GRAPH_QUERY_TOOL_DESCRIPTION = (
     "执行一条只读 Cypher，自由查询当前真实规则图谱，可使用多跳、反向、路径、过滤、排序和"

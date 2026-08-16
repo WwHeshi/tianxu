@@ -39,7 +39,7 @@ export function AdminUsers() {
   const [notice, setNotice] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [initialPassword, setInitialPassword] = useState("");
   const [role, setRole] = useState<UserRole>("user");
   const [isCreating, setIsCreating] = useState(false);
 
@@ -65,8 +65,8 @@ export function AdminUsers() {
     event.preventDefault();
     setError("");
     setNotice("");
-    if (username.trim().length < 3 || !displayName.trim() || temporaryPassword.length < 8) {
-      setError("请完整填写用户名、显示名称和至少 8 个字符的临时密码。");
+    if (username.trim().length < 3 || !displayName.trim() || initialPassword.length < 8) {
+      setError("请完整填写用户名、显示名称和至少 8 个字符的初始密码。");
       return;
     }
     setIsCreating(true);
@@ -74,14 +74,14 @@ export function AdminUsers() {
       await createUser({
         username: username.trim(),
         display_name: displayName.trim(),
-        temporary_password: temporaryPassword,
+        password: initialPassword,
         role,
       });
       setUsername("");
       setDisplayName("");
-      setTemporaryPassword("");
+      setInitialPassword("");
       setRole("user");
-      setNotice("用户已创建，首次登录时必须修改临时密码。");
+      setNotice("用户已创建，可以直接使用初始密码登录。");
       await load();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "用户创建失败。");
@@ -125,6 +125,7 @@ export function AdminUsers() {
       isLoading={isGuardLoading || isLoading}
       loadingText="正在读取用户"
       error={guardError}
+      pageClassName="admin-users-page"
     >
         <section className="admin-heading">
           <div><p className="eyebrow">ACCESS CONTROL</p><h1>用户管理</h1></div>
@@ -136,7 +137,7 @@ export function AdminUsers() {
           <form onSubmit={handleCreate}>
             <label><span>用户名</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="off" placeholder="例如 reader01" /></label>
             <label><span>显示名称</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" placeholder="用户姓名或称呼" /></label>
-            <label><span>临时密码</span><input value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" autoComplete="new-password" placeholder="至少 8 个字符" /></label>
+            <label><span>初始密码</span><input value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} type="password" autoComplete="new-password" placeholder="至少 8 个字符" /></label>
             <label><span>角色</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
             <button type="submit" disabled={isCreating}>{isCreating ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />}{isCreating ? "正在创建" : "创建用户"}</button>
           </form>
@@ -148,15 +149,22 @@ export function AdminUsers() {
         <section className="admin-table-card" aria-label="用户列表">
           <div className="admin-table-header"><strong>账户列表</strong><button type="button" onClick={() => void load()}><RefreshCcw size={14} />刷新</button></div>
           <div className="admin-table-wrap">
-            <table>
+            <table className="admin-user-table">
+              <colgroup>
+                <col className="admin-user-column" />
+                <col className="admin-role-column" />
+                <col className="admin-status-column" />
+                <col className="admin-login-column" />
+                <col className="admin-actions-column" />
+              </colgroup>
               <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>最后登录</th><th>操作</th></tr></thead>
               <tbody>
                 {users.map((user) => {
                   const busy = busyUserId === user.id;
                   return (
                     <tr key={user.id}>
-                      <td><strong>{user.display_name}</strong><span>{user.username}{user.id === admin?.id ? " · 当前账户" : ""}</span></td>
-                      <td>
+                      <td data-label="用户"><div className="user-identity"><strong>{user.display_name}</strong><span>{user.username}{user.id === admin?.id ? " · 当前账户" : ""}</span></div></td>
+                      <td data-label="角色">
                         <select
                           value={user.role}
                           disabled={busy}
@@ -165,9 +173,9 @@ export function AdminUsers() {
                           <option value="user">普通用户</option><option value="admin">管理员</option>
                         </select>
                       </td>
-                      <td><span className={`user-status is-${user.status}`}>{user.status === "active" ? "启用" : "停用"}</span>{user.must_change_password && <small>待改密码</small>}</td>
-                      <td>{formatDate(user.last_login_at)}</td>
-                      <td>
+                      <td data-label="状态"><div className="user-state"><span className={`user-status is-${user.status}`}>{user.status === "active" ? "启用" : "停用"}</span></div></td>
+                      <td data-label="最后登录" className="user-login-time">{formatDate(user.last_login_at)}</td>
+                      <td data-label="操作">
                         <div className="user-actions">
                           <button type="button" disabled={busy} onClick={() => handleReset(user)}><KeyRound size={13} />重置密码</button>
                           <button type="button" disabled={busy} onClick={() => void mutateUser(user.id, () => revokeUserSessions(user.id), "该用户的登录状态已全部撤销。")}>强制退出</button>

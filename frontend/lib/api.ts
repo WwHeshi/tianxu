@@ -1,5 +1,9 @@
 import type {
   AgentDebugTrace,
+  AgentConversationDetail,
+  AgentConversationList,
+  AgentConversationStreamEvent,
+  AgentConversationTrace,
   AdminUserCreate,
   AdminUserUpdate,
   ChartPreview,
@@ -150,6 +154,94 @@ export function logout(): Promise<void> {
 
 export function getCurrentUser(): Promise<CurrentUser> {
   return requestJson<CurrentUser>("/api/v1/auth/me", { method: "GET" });
+}
+
+export function listAgentConversations(): Promise<AgentConversationList> {
+  return requestJson<AgentConversationList>("/api/v1/chat/conversations", { method: "GET" });
+}
+
+export function createAgentConversation(
+  birthInput: ChartPreviewRequest | null = null,
+): Promise<AgentConversationDetail> {
+  return requestJson<AgentConversationDetail>("/api/v1/chat/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ birth_input: birthInput }),
+  });
+}
+
+export function getAgentConversation(conversationId: string): Promise<AgentConversationDetail> {
+  return requestJson<AgentConversationDetail>(
+    `/api/v1/chat/conversations/${conversationId}`,
+    { method: "GET" },
+  );
+}
+
+export async function streamAgentConversationMessage(
+  conversationId: string,
+  content: string,
+  onEvent: (event: AgentConversationStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/v1/chat/conversations/${conversationId}/messages`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/x-ndjson",
+        },
+        body: JSON.stringify({ content }),
+        signal,
+      },
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new Error("无法连接后端服务，请确认后端已经启动。");
+  }
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as FastApiValidationError | null;
+    throw new ApiError(getErrorMessage(payload, response.status), response.status);
+  }
+  if (!response.body) throw new Error("浏览器没有收到可读取的流式响应。");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      onEvent(JSON.parse(trimmed) as AgentConversationStreamEvent);
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) {
+    onEvent(JSON.parse(buffer) as AgentConversationStreamEvent);
+  }
+}
+
+export function getAgentConversationTrace(
+  conversationId: string,
+  messageId: number,
+): Promise<AgentConversationTrace> {
+  return requestJson<AgentConversationTrace>(
+    `/api/v1/chat/conversations/${conversationId}/messages/${messageId}/trace`,
+    { method: "GET" },
+  );
+}
+
+export function deleteAgentConversation(conversationId: string): Promise<void> {
+  return requestJson<void>(`/api/v1/chat/conversations/${conversationId}`, {
+    method: "DELETE",
+  });
 }
 
 export function changePassword(

@@ -535,6 +535,80 @@ class ReportGenerationResponse(BaseModel):
     debug_trace: AgentDebugTrace | None = None
 
 
+class AgentConversationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    birth_input: BirthInput | None = None
+
+
+class AgentConversationSend(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1)
+
+    @field_validator("content")
+    @classmethod
+    def strip_content(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("消息不能为空")
+        return stripped
+
+
+class AgentConversationSummaryResponse(BaseModel):
+    id: UUID
+    title: str
+    has_chart: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentConversationChartResponse(BaseModel):
+    gender: Gender
+    true_solar_datetime: datetime
+    birthplace: str | None
+    year_pillar: str
+    month_pillar: str
+    day_pillar: str
+    hour_pillar: str
+    day_master: str
+
+
+class AgentConversationMessageResponse(BaseModel):
+    id: int
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime
+    trace_available: bool = False
+
+
+class AgentConversationDetailResponse(AgentConversationSummaryResponse):
+    chart: AgentConversationChartResponse | None
+    messages: list[AgentConversationMessageResponse]
+
+
+class AgentConversationListResponse(BaseModel):
+    items: list[AgentConversationSummaryResponse]
+
+
+class AgentConversationTurnResponse(BaseModel):
+    title: str
+    updated_at: datetime
+    user_message: AgentConversationMessageResponse
+    assistant_message: AgentConversationMessageResponse
+
+
+class AgentConversationTraceResponse(BaseModel):
+    api_protocol: str
+    model: str
+    endpoint: str
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+    model_calls: list[AgentModelCallTrace] = Field(default_factory=list)
+    tool_executions: list[AgentToolExecutionTrace] = Field(default_factory=list)
+    redacted: list[str]
+
+
 UserRole = Literal["user", "admin"]
 UserStatus = Literal["active", "disabled"]
 
@@ -572,7 +646,6 @@ class UserResponse(BaseModel):
     display_name: str
     role: UserRole
     status: UserStatus
-    must_change_password: bool
     last_login_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -612,7 +685,7 @@ class AdminUserCreate(BaseModel):
 
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.@+-]+$")
     display_name: str = Field(min_length=1, max_length=80)
-    temporary_password: SecretStr = Field(min_length=8, max_length=128)
+    password: SecretStr = Field(min_length=8, max_length=128)
     role: UserRole = "user"
 
     @field_validator("username")

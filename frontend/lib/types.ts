@@ -9,7 +9,6 @@ export interface CurrentUser {
   display_name: string;
   role: UserRole;
   status: UserStatus;
-  must_change_password: boolean;
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
@@ -172,7 +171,7 @@ export interface GraphOrganizingTrace extends GraphOrganizingTraceSummary {
 export interface AdminUserCreate {
   username: string;
   display_name: string;
-  temporary_password: string;
+  password: string;
   role: UserRole;
 }
 
@@ -591,3 +590,65 @@ export interface ReportGenerationResponse {
   };
   debug_trace: AgentDebugTrace | null;
 }
+
+export interface AgentConversationSummary {
+  id: string;
+  title: string;
+  has_chart: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentConversationChart {
+  gender: Gender;
+  true_solar_datetime: string;
+  birthplace: string | null;
+  year_pillar: string;
+  month_pillar: string;
+  day_pillar: string;
+  hour_pillar: string;
+  day_master: string;
+}
+
+export interface AgentConversationMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  trace_available: boolean;
+}
+
+export interface AgentConversationDetail extends AgentConversationSummary {
+  chart: AgentConversationChart | null;
+  messages: AgentConversationMessage[];
+}
+
+export interface AgentConversationList {
+  items: AgentConversationSummary[];
+}
+
+export interface AgentConversationTurn {
+  title: string;
+  updated_at: string;
+  user_message: AgentConversationMessage;
+  assistant_message: AgentConversationMessage;
+}
+
+export interface AgentConversationTrace {
+  api_protocol: ModelApiProtocol;
+  model: string;
+  endpoint: string;
+  system_prompt: string | null;
+  user_prompt: string | null;
+  model_calls: AgentModelCallTrace[];
+  tool_executions: AgentToolExecutionTrace[];
+  redacted: string[];
+}
+
+export type AgentConversationStreamEvent =
+  | { type: "status"; state: "thinking" }
+  | { type: "delta"; content: string }
+  | { type: "reset" }
+  | { type: "tool"; phase: "started" | "completed"; name: string }
+  | { type: "complete"; turn: AgentConversationTurn }
+  | { type: "error"; message: string };

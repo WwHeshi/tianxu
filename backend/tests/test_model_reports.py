@@ -114,7 +114,6 @@ def authenticated_user(role: str = "admin") -> User:
         password_hash="unused",
         role=role,
         status="active",
-        must_change_password=False,
     )
 
 
@@ -322,7 +321,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v21-rule-graph"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v22-graph-first"
     assert "knowledge_version" not in data["metadata"]
     assert "citations" not in data
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"

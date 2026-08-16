@@ -46,9 +46,8 @@ async def create_user(
         user = await repository.create_user(
             username=payload.username,
             display_name=payload.display_name,
-            password_hash=hash_password(payload.temporary_password.get_secret_value()),
+            password_hash=hash_password(payload.password.get_secret_value()),
             role=payload.role,
-            must_change_password=True,
         )
     except IntegrityError as exc:
         await repository.session.rollback()
@@ -131,7 +130,6 @@ async def reset_user_password(
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
     user.password_hash = hash_password(payload.new_password.get_secret_value())
-    user.must_change_password = False
     await repository.save_user(user)
     await repository.revoke_user_sessions(user.id)
     await repository.add_audit_log(
