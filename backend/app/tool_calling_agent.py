@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterable
 from copy import deepcopy
@@ -263,11 +264,14 @@ async def run_tool_calling_agent(
     client: httpx.AsyncClient,
     tool_registry: AgentToolRegistry | None = None,
     capabilities: Iterable[AgentCapability] = (),
+    timeout_seconds: float | None = None,
 ) -> ToolCallingResult:
     """Run a tool loop with explicitly registered tools and complete capabilities."""
 
     if (output_schema_name is None) != (output_schema is None):
         raise ValueError("output schema name and schema must be provided together")
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be greater than zero")
 
     capability_registry = AgentCapabilityRegistry(tuple(capabilities))
     system_prompt = capability_registry.apply_prompt(system_prompt)
@@ -297,6 +301,7 @@ async def run_tool_calling_agent(
     last_request_body: dict[str, Any] = {}
     last_payload: dict[str, Any] = {}
     last_status_code: int | None = None
+    deadline = perf_counter() + timeout_seconds if timeout_seconds is not None else None
 
     def run_error(
         message: str,
@@ -322,7 +327,24 @@ async def run_tool_calling_agent(
             fatal=fatal,
         )
 
+    def timeout_error() -> ToolCallingRunError:
+        assert timeout_seconds is not None
+        if timeout_seconds >= 60 and timeout_seconds % 60 == 0:
+            duration = f"{timeout_seconds / 60:g} 分钟"
+        else:
+            duration = f"{timeout_seconds:g} 秒"
+        return run_error(f"Agent Session 运行超过 {duration}。", fatal=True)
+
+    def remaining_timeout() -> float | None:
+        if deadline is None:
+            return None
+        remaining = deadline - perf_counter()
+        if remaining <= 0:
+            raise timeout_error()
+        return remaining
+
     while True:
+        remaining_timeout()
         if api_protocol == "responses":
             request_body = {
                 "model": model,
@@ -366,14 +388,29 @@ async def run_tool_calling_agent(
 
         started = perf_counter()
         try:
-            response = await client.post(
-                endpoint,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_body,
-            )
+            remaining = remaining_timeout()
+            if remaining is None:
+                response = await client.post(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=request_body,
+                )
+            else:
+                async with asyncio.timeout(remaining):
+                    response = await client.post(
+                        endpoint,
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=request_body,
+                    )
+        except TimeoutError as exc:
+            total_latency_ms += round((perf_counter() - started) * 1000)
+            raise timeout_error() from exc
         except httpx.TimeoutException as exc:
             total_latency_ms += round((perf_counter() - started) * 1000)
             raise run_error(
@@ -469,10 +506,20 @@ async def run_tool_calling_agent(
             for requested_call in requested_calls:
                 tool_started = perf_counter()
                 try:
-                    dispatched = await tool_registry.dispatch_async(
-                        requested_call.name,
-                        requested_call.arguments,
-                    )
+                    remaining = remaining_timeout()
+                    if remaining is None:
+                        dispatched = await tool_registry.dispatch_async(
+                            requested_call.name,
+                            requested_call.arguments,
+                        )
+                    else:
+                        async with asyncio.timeout(remaining):
+                            dispatched = await tool_registry.dispatch_async(
+                                requested_call.name,
+                                requested_call.arguments,
+                            )
+                except TimeoutError as exc:
+                    raise timeout_error() from exc
                 except AgentToolError as exc:
                     raise run_error(str(exc)) from exc
                 tool_duration_ms = round((perf_counter() - tool_started) * 1000)

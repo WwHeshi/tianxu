@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .database import get_session
 from .models import GraphOrganizingJob, GraphOrganizingTrace
 
-ACTIVE_GRAPH_JOB_STATUSES = ("queued", "analyzing")
+RUNNABLE_GRAPH_JOB_STATUSES = ("queued", "analyzing")
+UNFINISHED_GRAPH_JOB_STATUSES = (
+    "queued",
+    "analyzing",
+    "pause_requested",
+    "paused",
+    "cancel_requested",
+)
 
 
 class GraphOrganizerRepository:
@@ -26,12 +33,29 @@ class GraphOrganizerRepository:
     async def get(self, job_id: UUID) -> GraphOrganizingJob | None:
         return await self.session.get(GraphOrganizingJob, job_id)
 
+    async def get_for_update(self, job_id: UUID) -> GraphOrganizingJob | None:
+        result = await self.session.execute(
+            select(GraphOrganizingJob)
+            .where(GraphOrganizingJob.id == job_id)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def save(self, job: GraphOrganizingJob) -> GraphOrganizingJob:
+        await self.session.commit()
+        await self.session.refresh(job)
+        return job
+
+    async def refresh(self, job: GraphOrganizingJob) -> GraphOrganizingJob:
+        await self.session.refresh(job)
+        return job
+
     async def active_for_document(self, document_id: UUID) -> GraphOrganizingJob | None:
         result = await self.session.execute(
             select(GraphOrganizingJob)
             .where(
                 GraphOrganizingJob.document_id == document_id,
-                GraphOrganizingJob.status.in_(ACTIVE_GRAPH_JOB_STATUSES),
+                GraphOrganizingJob.status.in_(UNFINISHED_GRAPH_JOB_STATUSES),
             )
             .order_by(GraphOrganizingJob.created_at)
             .limit(1)

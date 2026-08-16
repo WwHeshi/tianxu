@@ -2,12 +2,16 @@
 
 import {
   AlertCircle,
+  Ban,
   Bot,
   CheckCircle2,
   Database,
   FileText,
   GitMerge,
   LoaderCircle,
+  Pause,
+  Play,
+  RotateCcw,
   Search,
   Upload,
   Workflow,
@@ -25,12 +29,16 @@ import { AgentDebugModal } from "@/components/agent-debug-modal";
 import { KnowledgeGraphCanvas } from "@/components/knowledge-graph-canvas";
 import { useAdminGuard } from "@/hooks/use-admin-guard";
 import {
+  cancelGraphOrganizingJob,
   getKnowledgeGraphSnapshot,
   getKnowledgeGraphStatus,
   getGraphOrganizingTrace,
   listGraphOrganizingJobs,
   listGraphOrganizingTraces,
   listKnowledgeDocuments,
+  pauseGraphOrganizingJob,
+  resumeGraphOrganizingJob,
+  retryGraphOrganizingJob,
   startGraphOrganizingJob,
   uploadKnowledgeDocument,
 } from "@/lib/api";
@@ -45,14 +53,36 @@ import type {
 } from "@/lib/types";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const ACTIVE_JOB_STATUSES: GraphOrganizingJobStatus[] = ["queued", "analyzing"];
+const POLLING_JOB_STATUSES: GraphOrganizingJobStatus[] = [
+  "queued",
+  "analyzing",
+  "pause_requested",
+  "cancel_requested",
+];
+const UNFINISHED_JOB_STATUSES: GraphOrganizingJobStatus[] = [
+  ...POLLING_JOB_STATUSES,
+  "paused",
+];
+const CANCELLABLE_JOB_STATUSES: GraphOrganizingJobStatus[] = [
+  "queued",
+  "analyzing",
+  "pause_requested",
+  "paused",
+  "cancel_requested",
+];
 
 const JOB_STATUS_LABELS: Record<GraphOrganizingJobStatus, string> = {
   queued: "排队中",
   analyzing: "正在分析",
+  pause_requested: "正在暂停",
+  paused: "已暂停",
+  cancel_requested: "正在取消",
+  cancelled: "已取消",
   applied: "已自动融合",
   failed: "失败",
 };
+
+type GraphJobAction = "pause" | "resume" | "retry" | "cancel";
 
 function titleFromFilename(filename: string): string {
   return filename.replace(/\.txt$/i, "");
@@ -64,8 +94,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function isActiveJob(job: GraphOrganizingJob): boolean {
-  return ACTIVE_JOB_STATUSES.includes(job.status);
+function isPollingJob(job: GraphOrganizingJob): boolean {
+  return POLLING_JOB_STATUSES.includes(job.status);
+}
+
+function isUnfinishedJob(job: GraphOrganizingJob): boolean {
+  return UNFINISHED_JOB_STATUSES.includes(job.status);
 }
 
 function jobProgress(job: GraphOrganizingJob): number {
@@ -76,12 +110,22 @@ function jobProgress(job: GraphOrganizingJob): number {
 
 function JobList({
   jobs,
+  actingJob,
   loadingTraceJobId,
+  onCancel,
   onOpenTrace,
+  onPause,
+  onResume,
+  onRetry,
 }: {
   jobs: GraphOrganizingJob[];
+  actingJob: { jobId: string; action: GraphJobAction } | null;
   loadingTraceJobId: string | null;
+  onCancel: (job: GraphOrganizingJob) => void;
   onOpenTrace: (job: GraphOrganizingJob) => void;
+  onPause: (job: GraphOrganizingJob) => void;
+  onResume: (job: GraphOrganizingJob) => void;
+  onRetry: (job: GraphOrganizingJob) => void;
 }) {
   if (jobs.length === 0) {
     return (
@@ -96,6 +140,8 @@ function JobList({
     <div className="graph-job-list">
       {jobs.slice(0, 6).map((job) => {
         const progress = jobProgress(job);
+        const actingAction = actingJob?.jobId === job.id ? actingJob.action : null;
+        const hasPendingAction = actingJob !== null;
         return (
           <article className="graph-job" data-status={job.status} key={job.id}>
             <header>
@@ -111,17 +157,76 @@ function JobList({
                   ? `新增 ${job.rules_created} · 合并 ${job.rules_merged} · 关系 ${job.relations_written}`
                   : `${job.processed_sections}/${job.total_sections || "-"} 段 · 已提取 ${job.rules_extracted} 条`}
               </p>
-              <button
-                className="evaluation-trace-button"
-                type="button"
-                disabled={job.status === "queued" || loadingTraceJobId === job.id}
-                onClick={() => onOpenTrace(job)}
-              >
-                {loadingTraceJobId === job.id
-                  ? <LoaderCircle className="spin" size={12} />
-                  : <Workflow size={12} />}
-                {loadingTraceJobId === job.id ? "读取中" : "查看轨迹"}
-              </button>
+              <div className="graph-job-action-buttons">
+                {(["queued", "analyzing", "pause_requested"] as GraphOrganizingJobStatus[])
+                  .includes(job.status) && (
+                  <button
+                    className="graph-job-control-button"
+                    type="button"
+                    disabled={job.status === "pause_requested" || hasPendingAction}
+                    onClick={() => onPause(job)}
+                  >
+                    {actingAction === "pause"
+                      ? <LoaderCircle className="spin" size={12} />
+                      : <Pause size={12} />}
+                    {actingAction === "pause"
+                      ? "处理中"
+                      : job.status === "pause_requested" ? "暂停中" : "暂停"}
+                  </button>
+                )}
+                {job.status === "paused" && (
+                  <button
+                    className="graph-job-control-button"
+                    type="button"
+                    disabled={hasPendingAction}
+                    onClick={() => onResume(job)}
+                  >
+                    {actingAction === "resume"
+                      ? <LoaderCircle className="spin" size={12} />
+                      : <Play size={12} />}
+                    {actingAction === "resume" ? "处理中" : "继续"}
+                  </button>
+                )}
+                {job.status === "failed" && (
+                  <button
+                    className="graph-job-control-button"
+                    type="button"
+                    disabled={hasPendingAction}
+                    onClick={() => onRetry(job)}
+                  >
+                    {actingAction === "retry"
+                      ? <LoaderCircle className="spin" size={12} />
+                      : <RotateCcw size={12} />}
+                    {actingAction === "retry" ? "处理中" : "重试"}
+                  </button>
+                )}
+                {CANCELLABLE_JOB_STATUSES.includes(job.status) && (
+                  <button
+                    className="graph-job-control-button is-danger"
+                    type="button"
+                    disabled={job.status === "cancel_requested" || hasPendingAction}
+                    onClick={() => onCancel(job)}
+                  >
+                    {actingAction === "cancel"
+                      ? <LoaderCircle className="spin" size={12} />
+                      : <Ban size={12} />}
+                    {actingAction === "cancel" || job.status === "cancel_requested"
+                      ? "取消中"
+                      : "取消"}
+                  </button>
+                )}
+                <button
+                  className="evaluation-trace-button"
+                  type="button"
+                  disabled={job.status === "queued" || loadingTraceJobId === job.id}
+                  onClick={() => onOpenTrace(job)}
+                >
+                  {loadingTraceJobId === job.id
+                    ? <LoaderCircle className="spin" size={12} />
+                    : <Workflow size={12} />}
+                  {loadingTraceJobId === job.id ? "读取中" : "查看轨迹"}
+                </button>
+              </div>
             </div>
             {job.failure_message && <small title={job.failure_message}>{job.failure_message}</small>}
           </article>
@@ -207,10 +312,14 @@ export function AdminKnowledgeGraph() {
   const [traceSummaries, setTraceSummaries] = useState<GraphOrganizingTraceSummary[]>([]);
   const [activeTrace, setActiveTrace] = useState<GraphOrganizingTrace | null>(null);
   const [loadingTraceJobId, setLoadingTraceJobId] = useState<string | null>(null);
+  const [actingJob, setActingJob] = useState<{
+    jobId: string;
+    action: GraphJobAction;
+  } | null>(null);
   const [isSwitchingTrace, setIsSwitchingTrace] = useState(false);
-  const hasActiveJobs = jobs.some(isActiveJob);
-  const selectedDocumentActive = jobs.some(
-    (job) => job.document_id === selectedDocumentId && isActiveJob(job),
+  const hasPollingJobs = jobs.some(isPollingJob);
+  const selectedDocumentUnfinished = jobs.some(
+    (job) => job.document_id === selectedDocumentId && isUnfinishedJob(job),
   );
 
   useEffect(() => {
@@ -249,7 +358,7 @@ export function AdminKnowledgeGraph() {
   }, [admin]);
 
   useEffect(() => {
-    if (!admin || !hasActiveJobs) return () => undefined;
+    if (!admin || !hasPollingJobs) return () => undefined;
     let active = true;
     async function pollJobs() {
       try {
@@ -261,7 +370,7 @@ export function AdminKnowledgeGraph() {
         const hasNewCommittedSection = response.items.some(
           (job) => job.processed_sections > (committedSectionsRef.current.get(job.id) ?? 0),
         );
-        if (hasNewCommittedSection || hasNewAppliedJob || !response.items.some(isActiveJob)) {
+        if (hasNewCommittedSection || hasNewAppliedJob || !response.items.some(isPollingJob)) {
           const [statusResponse, snapshotResponse] = await Promise.all([
             getKnowledgeGraphStatus(),
             getKnowledgeGraphSnapshot(),
@@ -287,7 +396,7 @@ export function AdminKnowledgeGraph() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [admin, hasActiveJobs]);
+  }, [admin, hasPollingJobs]);
 
   function chooseFile(file: File | null) {
     setError("");
@@ -353,6 +462,79 @@ export function AdminKnowledgeGraph() {
       setError(requestError instanceof Error ? requestError.message : "无法启动自动整理。");
     } finally {
       setIsStarting(false);
+    }
+  }
+
+  function replaceJob(updated: GraphOrganizingJob) {
+    setJobs((current) => current.map((job) => job.id === updated.id ? updated : job));
+  }
+
+  async function handlePauseJob(job: GraphOrganizingJob) {
+    setError("");
+    setNotice("");
+    setActingJob({ jobId: job.id, action: "pause" });
+    try {
+      const updated = await pauseGraphOrganizingJob(job.id);
+      replaceJob(updated);
+      setNotice(
+        updated.status === "paused"
+          ? `《${updated.document_title}》已暂停。`
+          : `《${updated.document_title}》将在当前片段完成后暂停。`,
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "无法暂停整理任务。");
+    } finally {
+      setActingJob(null);
+    }
+  }
+
+  async function handleResumeJob(job: GraphOrganizingJob) {
+    setError("");
+    setNotice("");
+    setActingJob({ jobId: job.id, action: "resume" });
+    try {
+      const updated = await resumeGraphOrganizingJob(job.id);
+      replaceJob(updated);
+      setNotice(`《${updated.document_title}》已继续执行。`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "无法继续整理任务。");
+    } finally {
+      setActingJob(null);
+    }
+  }
+
+  async function handleRetryJob(job: GraphOrganizingJob) {
+    setError("");
+    setNotice("");
+    setActingJob({ jobId: job.id, action: "retry" });
+    try {
+      const updated = await retryGraphOrganizingJob(job.id);
+      replaceJob(updated);
+      setNotice(`《${updated.document_title}》将从上次进度继续重试。`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "无法重试整理任务。");
+    } finally {
+      setActingJob(null);
+    }
+  }
+
+  async function handleCancelJob(job: GraphOrganizingJob) {
+    const confirmed = window.confirm(
+      `确认取消《${job.document_title}》的整理任务吗？\n\n`
+      + "任务会立即停止，已经写入规则图谱的内容会保留。取消后不能继续或重试。",
+    );
+    if (!confirmed) return;
+    setError("");
+    setNotice("");
+    setActingJob({ jobId: job.id, action: "cancel" });
+    try {
+      const updated = await cancelGraphOrganizingJob(job.id);
+      replaceJob(updated);
+      setNotice(`《${updated.document_title}》的整理任务已取消。`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "无法取消整理任务。");
+    } finally {
+      setActingJob(null);
     }
   }
 
@@ -501,12 +683,14 @@ export function AdminKnowledgeGraph() {
               disabled={
                 !selectedDocumentId
                 || isStarting
-                || selectedDocumentActive
+                || selectedDocumentUnfinished
                 || graphStatus?.connected !== true
               }
             >
               {isStarting ? <LoaderCircle className="spin" size={15} /> : <Bot size={15} />}
-              {isStarting ? "正在创建任务" : selectedDocumentActive ? "这份资料正在整理" : "开始自动整理"}
+              {isStarting
+                ? "正在创建任务"
+                : selectedDocumentUnfinished ? "这份资料已有整理任务" : "开始自动整理"}
             </button>
           </section>
 
@@ -517,8 +701,13 @@ export function AdminKnowledgeGraph() {
             </header>
             <JobList
               jobs={jobs}
+              actingJob={actingJob}
               loadingTraceJobId={loadingTraceJobId}
+              onCancel={(job) => { void handleCancelJob(job); }}
               onOpenTrace={(job) => { void handleOpenTrace(job); }}
+              onPause={(job) => { void handlePauseJob(job); }}
+              onResume={(job) => { void handleResumeJob(job); }}
+              onRetry={(job) => { void handleRetryJob(job); }}
             />
           </section>
         </aside>

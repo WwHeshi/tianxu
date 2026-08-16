@@ -70,19 +70,33 @@ uv run pytest
 - `GET /api/v1/admin/graph/status`
 - `GET /api/v1/admin/graph/jobs`
 - `POST /api/v1/admin/graph/jobs`
+- `POST /api/v1/admin/graph/jobs/{job_id}/pause`
+- `POST /api/v1/admin/graph/jobs/{job_id}/resume`
+- `POST /api/v1/admin/graph/jobs/{job_id}/retry`
+- `POST /api/v1/admin/graph/jobs/{job_id}/cancel`
 - `GET /api/v1/admin/graph/jobs/{job_id}/traces`
 - `GET /api/v1/admin/graph/jobs/{job_id}/traces/{trace_id}`
 
 图谱接口只对管理员开放：快照接口直接读取 Neo4j 的真实节点和关系，任务接口把选定 TXT
-交给整理 Agent。`search_rule_graph` 每次直接读取当前 Neo4j；每段提取结果必须通过
-`submit_rule_graph` 终止工具提交，后端校验连续原文引文后，立即通过固定 Cypher 在单个事务
-中融合该段规则。写入成功才结束本段，后续段落因此能查询到前段的新规则；任务中途失败时
-已成功提交的段落会保留，失败段的事务不会部分写入。Agent 不能执行任意 Cypher，也不会自动
-删除或覆盖已有规则。TXT 原始文件继续保存在 PostgreSQL，临时阅读分段不会落库；Neo4j 只
-保存结构化规则、关系、来源编号和可回查的原文引文位置。提交成功后不再请求或校验模型最终
-回答。每个“段落 × 尝试”完成或失败后会保存一条紧凑执行轨迹，供管理员通过与
+交给整理 Agent。`search_rule_graph` 每次直接读取当前 Neo4j；`query_rule_graph` 根据工具描述
+内置的图谱 Schema 执行自由的只读 Cypher，可用于多跳、路径和聚合查询；每段提取结果通过
+`submit_rule_graph` 提交，后端自动附加当前片段范围后，立即通过固定 Cypher 在单个事务中融合
+该批规则，并把结果返回同一 Session。Agent 确认没有遗漏并停止调用工具后才结束本段；同一
+Session 可以继续搜索或分批提交，后续段落也能查询到已写入的新规则。任务中途失败时
+已成功提交的段落会保留，失败段的事务不会部分写入。自由查询会先由 Neo4j 验证为只读计划，
+数据库过程、外部文件和修改语句均被拒绝；Agent 不会自动删除或覆盖已有规则。TXT 原始文件
+继续保存在 PostgreSQL，临时阅读分段不会落库；Neo4j 只
+保存结构化规则、关系、来源编号和可回查的原文片段范围。提交成功后不再请求或校验模型最终
+回答。提交参数校验失败会作为工具结果返回同一 Agent Session，修正后可以继续提交；
+每段 Session 默认最多运行 600 秒，不限制工具和修正次数，可用
+`GRAPH_ORGANIZER_SECTION_TIMEOUT_SECONDS` 覆盖。每个“段落 × 尝试”完成或失败后会保存一条紧凑执行轨迹，供管理员通过与
 评测共用的调试界面查看模型请求、响应和工具执行；API 密钥及 Authorization 请求头不会
 写入轨迹，迁移前的历史整理任务也不会补生成轨迹。
+
+排队任务可以立即暂停；正在分析的任务会在当前段落完成并记录进度后暂停。继续和失败重试
+沿用原任务，从 `current_offset` 指向的未完成段落接着执行，并保留已有图谱、统计和轨迹。
+取消会终止当前 Agent Session 并释放后台 Worker；已经成功写入 Neo4j 的事务和历史轨迹保留，
+已取消任务不能继续或重试。
 
 图谱节点类型固定为 `Rule`、`ConditionGroup`、`Condition`、`Concept`、`Outcome` 和
 `Source`。条件组之间是 ANY，组内 `REQUIRES` 条件全部成立且 `EXCLUDES` 条件均不出现；

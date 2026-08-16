@@ -528,13 +528,23 @@ h3 { margin-bottom: 0; font-family: "Noto Serif SC", "Songti SC", serif; font-si
 .graph-job > header span { flex: 0 0 auto; color: #8a5b20; font-size: 8px; font-weight: 700; }
 .graph-job[data-status="applied"] > header span { color: #27705c; }
 .graph-job[data-status="failed"] > header span { color: #a04141; }
+.graph-job[data-status="paused"] > header span { color: #6f657f; }
+.graph-job[data-status="cancelled"] > header span { color: var(--quiet); }
 .graph-job-progress { height: 4px; overflow: hidden; background: #edf0ed; border-radius: 999px; }
 .graph-job-progress i { height: 100%; display: block; background: var(--accent); border-radius: inherit; transition: width .25s ease; }
 .graph-job[data-status="applied"] .graph-job-progress i { background: #3c8a70; }
 .graph-job[data-status="failed"] .graph-job-progress i { background: #b65050; }
+.graph-job[data-status="paused"] .graph-job-progress i { background: #81728f; }
+.graph-job[data-status="cancelled"] .graph-job-progress i { background: #a9afac; }
 .graph-job-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .graph-job-actions p { min-width: 0; margin: 0; color: var(--quiet); font-size: 8px; }
-.graph-job-actions .evaluation-trace-button { min-height: 26px; padding: 0 8px; font-size: 9px; }
+.graph-job-action-buttons { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; }
+.graph-job-actions .evaluation-trace-button, .graph-job-control-button { min-height: 26px; padding: 0 8px; font-size: 9px; }
+.graph-job-control-button { display: inline-flex; align-items: center; gap: 5px; color: #675777; background: #f5f1f8; border: 1px solid #d9cfe0; border-radius: 4px; font-weight: 700; white-space: nowrap; }
+.graph-job-control-button:hover:not(:disabled) { border-color: #8a7698; }
+.graph-job-control-button:disabled { cursor: not-allowed; opacity: .55; }
+.graph-job-control-button.is-danger { color: #9b4141; background: #fbf1f1; border-color: #e5c8c8; }
+.graph-job-control-button.is-danger:hover:not(:disabled) { border-color: #b65b5b; }
 .graph-job > small { overflow: hidden; color: #a04141; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .graph-trace-selector { display: flex; align-items: center; gap: 7px; color: var(--quiet); font-size: 9px; }
 .graph-trace-selector select { min-width: 168px; height: 34px; padding: 0 28px 0 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; font-size: 10px; }

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import dataclass
 
@@ -11,7 +12,7 @@ from app.agent_capabilities import (
     AgentCapabilityResult,
 )
 from app.agent_tools import AgentTool
-from app.tool_calling_agent import run_tool_calling_agent
+from app.tool_calling_agent import ToolCallingRunError, run_tool_calling_agent
 
 
 class EmptyInput(BaseModel):
@@ -189,3 +190,55 @@ async def test_responses_protocol_can_run_without_a_final_output_schema() -> Non
 
     assert "text" not in observed
     assert result.output_text == "普通最终回答"
+
+
+@pytest.mark.asyncio
+async def test_agent_session_timeout_preserves_completed_calls_and_tools() -> None:
+    request_count = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        if request_count == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_memory",
+                            "name": "memory_search",
+                            "arguments": "{}",
+                        }
+                    ]
+                },
+            )
+        await asyncio.sleep(0.5)
+        raise AssertionError("总时长截止后不应收到模型响应")
+
+    capability = FakeCapability(
+        "memory",
+        "动态目录",
+        empty_tool("memory_search"),
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ToolCallingRunError, match="0.1 秒") as error:
+            await run_tool_calling_agent(
+                api_protocol="responses",
+                model="test-model",
+                base_url="https://example.test/v1",
+                api_key="sk-test",
+                system_prompt="提示词",
+                user_prompt="问题",
+                output_schema_name=None,
+                output_schema=None,
+                client=client,
+                capabilities=(capability,),
+                timeout_seconds=0.1,
+            )
+
+    assert request_count == 2
+    assert error.value.fatal is True
+    assert error.value.retryable is False
+    assert len(error.value.model_calls) == 1
+    assert [item.name for item in error.value.tool_executions] == ["memory_search"]

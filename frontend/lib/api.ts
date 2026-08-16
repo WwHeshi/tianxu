@@ -255,6 +255,42 @@ export function startGraphOrganizingJob(
   });
 }
 
+export function pauseGraphOrganizingJob(
+  jobId: string,
+): Promise<GraphOrganizingJob> {
+  return requestJson<GraphOrganizingJob>(
+    `/api/v1/admin/graph/jobs/${jobId}/pause`,
+    { method: "POST" },
+  );
+}
+
+export function resumeGraphOrganizingJob(
+  jobId: string,
+): Promise<GraphOrganizingJob> {
+  return requestJson<GraphOrganizingJob>(
+    `/api/v1/admin/graph/jobs/${jobId}/resume`,
+    { method: "POST" },
+  );
+}
+
+export function retryGraphOrganizingJob(
+  jobId: string,
+): Promise<GraphOrganizingJob> {
+  return requestJson<GraphOrganizingJob>(
+    `/api/v1/admin/graph/jobs/${jobId}/retry`,
+    { method: "POST" },
+  );
+}
+
+export function cancelGraphOrganizingJob(
+  jobId: string,
+): Promise<GraphOrganizingJob> {
+  return requestJson<GraphOrganizingJob>(
+    `/api/v1/admin/graph/jobs/${jobId}/cancel`,
+    { method: "POST" },
+  );
+}
+
 export function uploadKnowledgeDocument(
   file: File,
   title: string,

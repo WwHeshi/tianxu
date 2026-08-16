@@ -16,22 +16,35 @@ from .agent_capabilities import (
 )
 from .agent_tools import AgentTool, AgentToolInputError
 from .agent_trace import snapshot_agent_trace
+from .config import graph_organizer_section_timeout_seconds
 from .graph_store import (
     GraphApplyResult,
     GraphConditionGroup,
+    GraphReadQueryError,
     GraphRuleMutation,
     GraphRuleNeighborhood,
     GraphRuleSummary,
-    GraphSourceExcerpt,
+    GraphSourceSection,
     GraphStore,
     normalize_graph_key,
     stable_graph_node_id,
 )
 from .tool_calling_agent import ToolCallingRunError, run_tool_calling_agent
 
-GRAPH_ORGANIZER_PROMPT_VERSION = "graph-organizer-v7"
+GRAPH_ORGANIZER_PROMPT_VERSION = "graph-organizer-v13"
 SECTION_TARGET_CHARACTERS = 2_000
 SECTION_MAX_CHARACTERS = 2_500
+
+RULE_GRAPH_QUERY_TOOL_DESCRIPTION = (
+    "执行一条只读 Cypher，自由查询当前真实规则图谱，可使用多跳、反向、路径、过滤、排序和"
+    "聚合。节点及常用属性：Rule(id,name,summary,aliases)、ConditionGroup(id,name,logic)、"
+    "Condition(id,name)、Concept(id,name)、Outcome(id,name)、Source(id,document_id,title,sha256)。"
+    "关系方向：Rule-[:HAS_CONDITION_GROUP]->ConditionGroup，ConditionGroup-[:REQUIRES|EXCLUDES]"
+    "->Condition，Rule-[:RELATES_TO]->Concept，Rule-[:PRODUCES|DOES_NOT_PROVE]->Outcome，"
+    "Condition-[:STRENGTHENS|WEAKENS]->Rule，Rule-[:SOURCED_FROM]->Source，Rule 之间可用"
+    " EQUIVALENT_TO、REFINES、EXCEPTION_TO、CONTRADICTS。只允许读取；数据库过程、外部文件"
+    "和修改语句会被拒绝。结果超过 100 行或内容过大时应使用 WHERE、SKIP、LIMIT 或减少字段。"
+)
 
 GRAPH_ORGANIZER_INSTRUCTIONS = (
     "你是命理知识图谱整理 Agent。只处理本次提供的 TXT 原文段落，把原文明示、脱离上下文仍可"
@@ -41,8 +54,7 @@ GRAPH_ORGANIZER_INSTRUCTIONS = (
     "具有‘当……则……’句式，也不要求包含吉凶结论。目录、页眉、书目信息、作者经历、纯叙事、"
     "孤立命例和信息不足的残句不提取，不使用段外知识补全。\n"
     "2. 一条规则表达一个可独立理解的知识命题。name 简短明确，summary 忠实概括，不添加原文"
-    "没有表达的因果、程度或必然性。source_excerpt 必须是足以支持该命题的本段连续原文，逐字"
-    "保留，不得改写或拼接。\n"
+    "没有表达的因果、程度或必然性。无需提交原文引文，后端会自动记录当前原文片段范围。\n"
     "3. concepts 填主要概念，outcomes 填原文直接陈述的事实或结论。没有前提时 condition_groups"
     " 必须直接传空数组，不得创建 all_of 和 none_of 都为空的条件组。条件判断的组间为任一组"
     "成立，all_of 为同时成立，none_of 为不得出现。strengthened_by、weakened_by 和"
@@ -51,8 +63,9 @@ GRAPH_ORGANIZER_INSTRUCTIONS = (
     "才用 existing_rule_id 合并；名称相似或部分重合不能合并，无法确认时留空。\n"
     "5. rule_links 只关联搜索到且关系明确的规则：REFINES 表示本规则更具体，EXCEPTION_TO 表示"
     "本规则是其例外，CONTRADICTS 表示两者确有冲突；语义相同应合并，不建立关系。\n"
-    "6. 最后单独调用一次 submit_rule_graph 提交本段全部规则；没有可提取知识时提交空 rules。"
-    "工具写入成功即完成本段，不再生成最终回答。"
+    "6. 调用 submit_rule_graph 提交规则；没有可提取知识时提交空 rules。工具返回 error 时按其中"
+    "位置修正后再次提交；工具返回写入结果后，检查是否还有遗漏，必要时继续搜索或提交。"
+    "确认本段全部完成后，停止调用工具并简短回复完成。"
 )
 
 
@@ -100,7 +113,6 @@ class ExtractedGraphRule(BaseModel):
     weakened_by: list[str] = Field(max_length=40)
     outcomes: list[str] = Field(max_length=40)
     does_not_prove: list[str] = Field(max_length=40)
-    source_excerpt: str = Field(min_length=1, max_length=4000)
     existing_rule_id: str = Field(max_length=100)
     rule_links: list[ExtractedRuleLink] = Field(max_length=30)
 
@@ -206,6 +218,28 @@ class SearchRuleGraphResult(BaseModel):
 
 
 class SearchRuleGraphOutput(RootModel[list[SearchRuleGraphResult]]):
+    pass
+
+
+class QueryRuleGraphInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cypher: str = Field(
+        min_length=1,
+        max_length=10_000,
+        description="要执行的只读 Cypher 查询语句。",
+    )
+
+    @field_validator("cypher")
+    @classmethod
+    def normalize_cypher(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("cypher 不能为空")
+        return normalized
+
+
+class QueryRuleGraphOutput(RootModel[list[dict[str, Any]]]):
     pass
 
 
@@ -602,8 +636,9 @@ class GraphOrganizerCapability:
 
     def prompt_section(self) -> str:
         return (
-            "search_rule_graph 每次调用都查询当前真实规则图谱。submit_rule_graph 会在校验后"
-            "立即写入当前段落的规则；写入成功后本段结束，后续段落可以查询到本段规则。"
+            "search_rule_graph 用关键词查询当前真实规则图谱；需要自定义路径、聚合或多层读取时"
+            "使用 query_rule_graph。submit_rule_graph 会在校验后立即写入当前段落的规则并返回"
+            "结果；同一 Session 后续查询和提交可以看到刚写入的规则，停止调用工具后本段结束。"
         )
 
     def tools(self) -> tuple[AgentTool, ...]:
@@ -620,15 +655,24 @@ class GraphOrganizerCapability:
                 execute=self._search,
             ),
             AgentTool(
+                name="query_rule_graph",
+                description=RULE_GRAPH_QUERY_TOOL_DESCRIPTION,
+                input_schema=QueryRuleGraphInput.model_json_schema(),
+                input_model=QueryRuleGraphInput,
+                execute=self._query,
+                return_input_errors=True,
+            ),
+            AgentTool(
                 name="submit_rule_graph",
                 description=(
                     "校验并立即写入从当前原文段提取出的全部规则。完成必要的现有规则查询后"
-                    "调用一次；没有可提取规则时将 rules 传为空数组。写入成功即结束本段。"
+                    "调用；没有可提取规则时将 rules 传为空数组。成功结果会返回当前 Session，"
+                    "确认没有遗漏后停止调用工具。"
                 ),
                 input_schema=GraphExtractionOutput.model_json_schema(),
                 input_model=GraphExtractionOutput,
                 execute=self._submit,
-                terminal=True,
+                return_input_errors=True,
             ),
         )
 
@@ -682,19 +726,16 @@ class GraphOrganizerCapability:
             ]
         )
 
+    async def _query(self, tool_input: BaseModel) -> QueryRuleGraphOutput:
+        cypher = QueryRuleGraphInput.model_validate(tool_input).cypher
+        try:
+            rows = await self._context.store.execute_read_query(cypher)
+        except GraphReadQueryError as exc:
+            raise AgentToolInputError(str(exc)) from exc
+        return QueryRuleGraphOutput(root=list(rows))
+
     async def _submit(self, tool_input: BaseModel) -> SubmitRuleGraphResult:
         extraction = GraphExtractionOutput.model_validate(tool_input)
-        for rule in extraction.rules:
-            excerpt = rule.source_excerpt
-            stripped_excerpt = excerpt.strip()
-            if (
-                excerpt not in self._context.section.text
-                and stripped_excerpt not in self._context.section.text
-            ):
-                raise AgentToolInputError(
-                    "submit_rule_graph 的 source_excerpt 必须逐字来自当前原文段。"
-                )
-
         existing_rules = await self._context.store.list_rule_summaries()
         mutations = merge_graph_extractions(
             ((self._context.section, extraction),),
@@ -759,6 +800,7 @@ async def extract_graph_section(
             output_schema=None,
             client=client,
             capabilities=(capability,),
+            timeout_seconds=graph_organizer_section_timeout_seconds(),
         )
     except ToolCallingRunError as exc:
         raise GraphOrganizerModelError(
@@ -859,14 +901,14 @@ class _MutableRule:
     refines_ids: list[str]
     exception_to_ids: list[str]
     conflicts_with_ids: list[str]
-    excerpts: list[GraphSourceExcerpt]
+    source_sections: list[GraphSourceSection]
 
 
 def merge_graph_extractions(
     extracted_sections: tuple[tuple[DocumentSection, GraphExtractionOutput], ...],
     existing_rules: tuple[GraphRuleSummary, ...],
 ) -> tuple[GraphRuleMutation, ...]:
-    """Validate excerpts and combine all section outputs into one safe change set."""
+    """Combine section outputs and attach their server-known source ranges."""
 
     existing_by_id = {rule.id: rule for rule in existing_rules}
     existing_by_key: dict[str, str] = {}
@@ -881,12 +923,7 @@ def merge_graph_extractions(
         for candidate in extraction.rules:
             name = _clean_text(candidate.name, maximum=200)
             summary = _clean_text(candidate.summary)
-            excerpt_text = candidate.source_excerpt
-            excerpt_index = section.text.find(excerpt_text)
-            if excerpt_index < 0:
-                excerpt_text = excerpt_text.strip()
-                excerpt_index = section.text.find(excerpt_text)
-            if not name or not summary or not excerpt_text or excerpt_index < 0:
+            if not name or not summary:
                 continue
 
             rule_id = candidate.existing_rule_id.strip()
@@ -925,7 +962,7 @@ def merge_graph_extractions(
                     refines_ids=[],
                     exception_to_ids=[],
                     conflicts_with_ids=[],
-                    excerpts=[],
+                    source_sections=[],
                 )
                 merged[rule_id] = current
             elif len(summary) > len(current.summary) and rule_id not in existing_by_id:
@@ -952,13 +989,9 @@ def merge_graph_extractions(
             for link in candidate.rule_links:
                 if link.id in existing_by_id and link.id != rule_id:
                     link_targets[link.relation].append(link.id)
-            excerpt = GraphSourceExcerpt(
-                text=excerpt_text,
-                start=section.start + excerpt_index,
-                end=section.start + excerpt_index + len(excerpt_text),
-            )
-            if excerpt not in current.excerpts:
-                current.excerpts.append(excerpt)
+            source_section = GraphSourceSection(start=section.start, end=section.end)
+            if source_section not in current.source_sections:
+                current.source_sections.append(source_section)
 
     return tuple(
         GraphRuleMutation(
@@ -976,7 +1009,7 @@ def merge_graph_extractions(
             refines_ids=tuple(dict.fromkeys(rule.refines_ids)),
             exception_to_ids=tuple(dict.fromkeys(rule.exception_to_ids)),
             conflicts_with_ids=tuple(dict.fromkeys(rule.conflicts_with_ids)),
-            excerpts=tuple(rule.excerpts),
+            source_sections=tuple(rule.source_sections),
         )
         for rule in sorted(merged.values(), key=lambda item: (item.name, item.id))
     )

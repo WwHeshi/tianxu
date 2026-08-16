@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from ..agent_trace import StoredAgentTrace, trace_model_calls, trace_prompts
-from ..auth import AdminUserDependency, AuthRepositoryDependency, request_ip
+from ..auth import AdminUserDependency, AuthRepositoryDependency, request_ip, utc_now
 from ..credentials import ModelCredentialRepository, get_credential_repository
 from ..graph_organizer import GRAPH_ORGANIZER_PROMPT_VERSION
 from ..graph_organizer_repository import GraphOrganizerRepositoryDependency
@@ -133,6 +133,147 @@ async def list_graph_organizing_jobs(
 ) -> GraphOrganizingJobListResponse:
     jobs = await repository.list_recent()
     return GraphOrganizingJobListResponse(items=[_job_response(job) for job in jobs])
+
+
+@router.post(
+    "/jobs/{job_id}/pause",
+    response_model=GraphOrganizingJobResponse,
+)
+async def pause_graph_organizing_job(
+    job_id: UUID,
+    request: Request,
+    admin: AdminUserDependency,
+    repository: GraphOrganizerRepositoryDependency,
+    auth_repository: AuthRepositoryDependency,
+) -> GraphOrganizingJobResponse:
+    job = await repository.get_for_update(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="整理任务不存在")
+    if job.status in {"pause_requested", "paused"}:
+        return _job_response(job)
+    if job.status == "queued":
+        job.status = "paused"
+    elif job.status == "analyzing":
+        job.status = "pause_requested"
+    else:
+        raise HTTPException(status_code=409, detail="只有排队中或正在分析的任务可以暂停")
+    await repository.save(job)
+    await auth_repository.add_audit_log(
+        actor_user_id=admin.id,
+        target_user_id=None,
+        action="admin.graph_organizing_paused",
+        details={"job_id": str(job.id), "document_id": str(job.document_id)},
+        ip_address=request_ip(request),
+    )
+    return _job_response(job)
+
+
+@router.post(
+    "/jobs/{job_id}/resume",
+    response_model=GraphOrganizingJobResponse,
+)
+async def resume_graph_organizing_job(
+    job_id: UUID,
+    request: Request,
+    admin: AdminUserDependency,
+    repository: GraphOrganizerRepositoryDependency,
+    auth_repository: AuthRepositoryDependency,
+) -> GraphOrganizingJobResponse:
+    job = await repository.get_for_update(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="整理任务不存在")
+    if job.status != "paused":
+        raise HTTPException(status_code=409, detail="只有已暂停的任务可以继续")
+    job.status = "queued"
+    job.failure_message = None
+    job.finished_at = None
+    job.prompt_version = GRAPH_ORGANIZER_PROMPT_VERSION
+    await repository.save(job)
+    await auth_repository.add_audit_log(
+        actor_user_id=admin.id,
+        target_user_id=None,
+        action="admin.graph_organizing_resumed",
+        details={"job_id": str(job.id), "document_id": str(job.document_id)},
+        ip_address=request_ip(request),
+    )
+    await graph_organizer_task_manager.enqueue(job.id)
+    return _job_response(job)
+
+
+@router.post(
+    "/jobs/{job_id}/retry",
+    response_model=GraphOrganizingJobResponse,
+)
+async def retry_graph_organizing_job(
+    job_id: UUID,
+    request: Request,
+    admin: AdminUserDependency,
+    repository: GraphOrganizerRepositoryDependency,
+    auth_repository: AuthRepositoryDependency,
+) -> GraphOrganizingJobResponse:
+    job = await repository.get_for_update(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="整理任务不存在")
+    if job.status != "failed":
+        raise HTTPException(status_code=409, detail="只有失败的任务可以重试")
+    if await repository.active_for_document(job.document_id) is not None:
+        raise HTTPException(status_code=409, detail="这份资料已有其他整理任务尚未完成")
+    job.status = "queued"
+    job.failure_message = None
+    job.finished_at = None
+    job.prompt_version = GRAPH_ORGANIZER_PROMPT_VERSION
+    await repository.save(job)
+    await auth_repository.add_audit_log(
+        actor_user_id=admin.id,
+        target_user_id=None,
+        action="admin.graph_organizing_retried",
+        details={"job_id": str(job.id), "document_id": str(job.document_id)},
+        ip_address=request_ip(request),
+    )
+    await graph_organizer_task_manager.enqueue(job.id)
+    return _job_response(job)
+
+
+@router.post(
+    "/jobs/{job_id}/cancel",
+    response_model=GraphOrganizingJobResponse,
+)
+async def cancel_graph_organizing_job(
+    job_id: UUID,
+    request: Request,
+    admin: AdminUserDependency,
+    repository: GraphOrganizerRepositoryDependency,
+    auth_repository: AuthRepositoryDependency,
+) -> GraphOrganizingJobResponse:
+    job = await repository.get_for_update(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="整理任务不存在")
+    if job.status == "cancelled":
+        return _job_response(job)
+    if job.status not in {"queued", "analyzing", "pause_requested", "paused"}:
+        raise HTTPException(status_code=409, detail="当前状态的整理任务不能取消")
+    if job.status in {"queued", "paused"}:
+        job.status = "cancelled"
+        job.finished_at = utc_now()
+    else:
+        job.status = "cancel_requested"
+    await repository.save(job)
+
+    await graph_organizer_task_manager.cancel(job.id)
+    await repository.refresh(job)
+    if job.status == "cancel_requested":
+        job.status = "cancelled"
+        job.finished_at = utc_now()
+        await repository.save(job)
+
+    await auth_repository.add_audit_log(
+        actor_user_id=admin.id,
+        target_user_id=None,
+        action="admin.graph_organizing_cancelled",
+        details={"job_id": str(job.id), "document_id": str(job.document_id)},
+        ip_address=request_ip(request),
+    )
+    return _job_response(job)
 
 
 @router.get(

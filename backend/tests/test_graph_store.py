@@ -1,13 +1,16 @@
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from neo4j import READ_ACCESS, Query
 
 from app.auth import get_current_user
 from app.graph_store import (
     GRAPH_CONSTRAINTS,
     GRAPH_NODE_LABELS,
+    GRAPH_READ_QUERY_MAX_ROWS,
     GRAPH_STATS_QUERY,
     RULE_NEIGHBORHOODS_QUERY,
     RULE_SUMMARIES_QUERY,
@@ -17,13 +20,14 @@ from app.graph_store import (
     GraphConditionGroup,
     GraphNeighborhoodNode,
     GraphNeighborhoodRelationship,
+    GraphReadQueryError,
     GraphRuleMutation,
     GraphRuleNeighborhood,
     GraphRuleSummary,
     GraphSnapshot,
     GraphSnapshotNode,
     GraphSnapshotRelationship,
-    GraphSourceExcerpt,
+    GraphSourceSection,
     GraphStats,
     GraphStore,
     GraphStoreUnavailable,
@@ -389,6 +393,119 @@ async def test_graph_store_indexes_rule_concepts_conditions_and_outcomes() -> No
     )
 
 
+class ReadQueryResult(AsyncRecordsResult):
+    def __init__(
+        self,
+        records: list[dict[str, Any]] | None = None,
+        *,
+        query_type: str = "r",
+    ) -> None:
+        super().__init__(records)
+        self.query_type = query_type
+
+    async def consume(self):
+        self.consumed = True
+        return SimpleNamespace(query_type=self.query_type)
+
+
+class ReadQuerySession:
+    def __init__(self, *, query_type: str = "r", records: list[dict[str, Any]] | None = None):
+        self.query_type = query_type
+        self.records = records or []
+        self.queries: list[Query] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def run(self, query: Query):
+        assert isinstance(query, Query)
+        self.queries.append(query)
+        if query.text.startswith("EXPLAIN"):
+            return ReadQueryResult(query_type=self.query_type)
+        return ReadQueryResult(self.records)
+
+
+class ReadQueryDriver:
+    def __init__(self, *, query_type: str = "r", records: list[dict[str, Any]] | None = None):
+        self.session_instance = ReadQuerySession(query_type=query_type, records=records)
+        self.session_calls: list[dict[str, Any]] = []
+
+    def session(self, **kwargs):
+        self.session_calls.append(kwargs)
+        return self.session_instance
+
+
+@pytest.mark.asyncio
+async def test_graph_store_executes_bounded_read_only_cypher() -> None:
+    driver = ReadQueryDriver(
+        records=[
+            {
+                "rule": "财格败条件",
+                "conditions": ["财轻比重", "财透七煞"],
+                "count": 2,
+            }
+        ]
+    )
+    store = make_store(driver)
+
+    rows = await store.execute_read_query(
+        "MATCH (rule:Rule)-[*1..2]->(node) RETURN rule.name AS rule, "
+        "collect(node.name) AS conditions, count(node) AS count;"
+    )
+
+    assert rows == (
+        {
+            "rule": "财格败条件",
+            "conditions": ["财轻比重", "财透七煞"],
+            "count": 2,
+        },
+    )
+    assert driver.session_calls == [
+        {"database": "neo4j", "default_access_mode": READ_ACCESS}
+    ]
+    planned, executed = driver.session_instance.queries
+    assert planned.text.startswith("EXPLAIN\nMATCH")
+    assert executed.text.startswith("CALL () {\nMATCH")
+    assert executed.text.endswith(f"LIMIT {GRAPH_READ_QUERY_MAX_ROWS + 1}")
+    assert planned.timeout == executed.timeout
+
+
+@pytest.mark.asyncio
+async def test_graph_store_rejects_queries_that_neo4j_marks_as_writing() -> None:
+    driver = ReadQueryDriver(query_type="rw")
+    store = make_store(driver)
+
+    with pytest.raises(GraphReadQueryError, match="只允许执行读取"):
+        await store.execute_read_query("MATCH (node) DELETE node")
+
+    assert len(driver.session_instance.queries) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cypher", "message"),
+    [
+        ("LOAD CSV FROM 'https://example.com/a.csv' AS row RETURN row", "LOAD CSV"),
+        ("CALL db.labels() YIELD label RETURN label", "数据库过程"),
+        ("PROFILE MATCH (node) RETURN node", "EXPLAIN 或 PROFILE"),
+    ],
+)
+async def test_graph_store_rejects_unsafe_read_query_forms(
+    cypher: str,
+    message: str,
+) -> None:
+    driver = ReadQueryDriver()
+    store = make_store(driver)
+
+    with pytest.raises(GraphReadQueryError, match=message):
+        await store.execute_read_query(cypher)
+
+    assert driver.session_calls == []
+
+
 class ApplyTransaction:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -455,7 +572,7 @@ def graph_mutation(rule_id: str, *, detailed: bool) -> GraphRuleMutation:
         refines_ids=("R-old",) if detailed else (),
         exception_to_ids=("R-old",) if detailed else (),
         conflicts_with_ids=("R-old",) if detailed else (),
-        excerpts=(GraphSourceExcerpt(text="身旺方能任财", start=2, end=8),),
+        source_sections=(GraphSourceSection(start=2, end=8),),
     )
 
 
@@ -486,8 +603,8 @@ async def test_graph_store_applies_validated_rules_in_one_write_transaction() ->
     rule_parameters = next(
         parameters for query, parameters in calls if "SOURCED_FROM" in query
     )
-    assert rule_parameters["excerpts"] == [
-        '{"text":"身旺方能任财","start":2,"end":8}'
+    assert rule_parameters["section_ranges"] == [
+        '{"job_id":"job-1","start":2,"end":8}'
     ]
 
 

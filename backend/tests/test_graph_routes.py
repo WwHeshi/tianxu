@@ -178,6 +178,200 @@ async def test_start_graph_job_requires_model_configuration(database_client) -> 
 
 
 @pytest.mark.asyncio
+async def test_graph_job_pause_resume_and_retry_keep_existing_progress(
+    database_client,
+    monkeypatch,
+) -> None:
+    client, session_factory = database_client
+    document = await add_document_and_credential(session_factory)
+    async with session_factory() as session:
+        analyzing_data = "分析中的资料。".encode()
+        analyzing_document = KnowledgeDocument(
+            title="分析任务",
+            original_filename="analyzing.txt",
+            encoding="utf-8",
+            byte_size=len(analyzing_data),
+            sha256=sha256(analyzing_data).hexdigest(),
+            file_data=analyzing_data,
+        )
+        failed_data = "需要重试的资料。".encode()
+        failed_document = KnowledgeDocument(
+            title="失败任务",
+            original_filename="failed.txt",
+            encoding="utf-8",
+            byte_size=len(failed_data),
+            sha256=sha256(failed_data).hexdigest(),
+            file_data=failed_data,
+        )
+        session.add_all([analyzing_document, failed_document])
+        await session.flush()
+        queued_job = GraphOrganizingJob(
+            document_id=document.id,
+            document_title="排队任务",
+            created_by_user_id=None,
+            provider="openai",
+            api_protocol="responses",
+            model="gpt-test",
+            base_url="https://example.test/v1",
+            prompt_version="test",
+            status="queued",
+        )
+        analyzing_job = GraphOrganizingJob(
+            document_id=analyzing_document.id,
+            document_title="分析任务",
+            created_by_user_id=None,
+            provider="openai",
+            api_protocol="responses",
+            model="gpt-test",
+            base_url="https://example.test/v1",
+            prompt_version="test",
+            status="analyzing",
+        )
+        failed_job = GraphOrganizingJob(
+            document_id=failed_document.id,
+            document_title="失败任务",
+            created_by_user_id=None,
+            provider="openai",
+            api_protocol="responses",
+            model="gpt-test",
+            base_url="https://example.test/v1",
+            prompt_version="test",
+            status="failed",
+            processed_sections=3,
+            current_offset=120,
+            rules_created=4,
+            failure_message="模型调用失败",
+        )
+        session.add_all([queued_job, analyzing_job, failed_job])
+        await session.commit()
+        await session.refresh(queued_job)
+        await session.refresh(analyzing_job)
+        await session.refresh(failed_job)
+
+    enqueued = []
+
+    async def fake_enqueue(job_id):
+        enqueued.append(job_id)
+
+    monkeypatch.setattr(graph_routes.graph_organizer_task_manager, "enqueue", fake_enqueue)
+    app.dependency_overrides[get_current_user] = admin_user
+    try:
+        paused = await client.post(f"/api/v1/admin/graph/jobs/{queued_job.id}/pause")
+        pause_requested = await client.post(
+            f"/api/v1/admin/graph/jobs/{analyzing_job.id}/pause"
+        )
+        resumed = await client.post(f"/api/v1/admin/graph/jobs/{queued_job.id}/resume")
+        retried = await client.post(f"/api/v1/admin/graph/jobs/{failed_job.id}/retry")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+    assert pause_requested.status_code == 200
+    assert pause_requested.json()["status"] == "pause_requested"
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "queued"
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "queued"
+    assert retried.json()["processed_sections"] == 3
+    assert retried.json()["current_offset"] == 120
+    assert retried.json()["rules_created"] == 4
+    assert retried.json()["failure_message"] is None
+    assert enqueued == [queued_job.id, failed_job.id]
+
+
+@pytest.mark.asyncio
+async def test_graph_job_actions_reject_terminal_or_wrong_states(database_client) -> None:
+    client, session_factory = database_client
+    document = await add_document_and_credential(session_factory)
+    async with session_factory() as session:
+        job = GraphOrganizingJob(
+            document_id=document.id,
+            document_title=document.title,
+            created_by_user_id=None,
+            provider="openai",
+            api_protocol="responses",
+            model="gpt-test",
+            base_url="https://example.test/v1",
+            prompt_version="test",
+            status="applied",
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+
+    app.dependency_overrides[get_current_user] = admin_user
+    try:
+        pause = await client.post(f"/api/v1/admin/graph/jobs/{job.id}/pause")
+        resume = await client.post(f"/api/v1/admin/graph/jobs/{job.id}/resume")
+        retry = await client.post(f"/api/v1/admin/graph/jobs/{job.id}/retry")
+        cancel = await client.post(f"/api/v1/admin/graph/jobs/{job.id}/cancel")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert pause.status_code == 409
+    assert resume.status_code == 409
+    assert retry.status_code == 409
+    assert cancel.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_cancel_graph_job_stops_active_run_and_keeps_progress(
+    database_client,
+    monkeypatch,
+) -> None:
+    client, session_factory = database_client
+    document = await add_document_and_credential(session_factory)
+    async with session_factory() as session:
+        job = GraphOrganizingJob(
+            document_id=document.id,
+            document_title=document.title,
+            created_by_user_id=None,
+            provider="openai",
+            api_protocol="responses",
+            model="gpt-test",
+            base_url="https://example.test/v1",
+            prompt_version="test",
+            status="analyzing",
+            total_sections=8,
+            processed_sections=3,
+            current_offset=120,
+            rules_created=4,
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+
+    cancelled = []
+
+    async def fake_cancel(job_id):
+        cancelled.append(job_id)
+        return False
+
+    monkeypatch.setattr(graph_routes.graph_organizer_task_manager, "cancel", fake_cancel)
+    app.dependency_overrides[get_current_user] = admin_user
+    try:
+        response = await client.post(f"/api/v1/admin/graph/jobs/{job.id}/cancel")
+        repeated = await client.post(f"/api/v1/admin/graph/jobs/{job.id}/cancel")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["processed_sections"] == 3
+    assert response.json()["current_offset"] == 120
+    assert response.json()["rules_created"] == 4
+    assert response.json()["finished_at"] is not None
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "cancelled"
+    assert cancelled == [job.id]
+    async with session_factory() as session:
+        audit = await session.get(AuditLog, 1)
+        assert audit is not None
+        assert audit.action == "admin.graph_organizing_cancelled"
+
+
+@pytest.mark.asyncio
 async def test_graph_trace_endpoints_reuse_agent_trace_shape(database_client) -> None:
     client, session_factory = database_client
     document = await add_document_and_credential(session_factory)

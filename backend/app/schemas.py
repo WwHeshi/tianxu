@@ -324,7 +324,16 @@ class GraphOrganizingJobResponse(BaseModel):
     document_id: UUID
     document_title: str
     model: str
-    status: Literal["queued", "analyzing", "applied", "failed"]
+    status: Literal[
+        "queued",
+        "analyzing",
+        "pause_requested",
+        "paused",
+        "cancel_requested",
+        "cancelled",
+        "applied",
+        "failed",
+    ]
     total_sections: int
     processed_sections: int
     current_offset: int

@@ -85,6 +85,10 @@ export interface KnowledgeGraphSnapshot {
 export type GraphOrganizingJobStatus =
   | "queued"
   | "analyzing"
+  | "pause_requested"
+  | "paused"
+  | "cancel_requested"
+  | "cancelled"
   | "applied"
   | "failed";
 

@@ -1,13 +1,17 @@
 """Neo4j-backed storage for the administrator-maintained rule graph."""
 
 import json
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Annotated
+from typing import Annotated, Any
 from unicodedata import normalize
 
 from fastapi import Depends
-from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import READ_ACCESS, AsyncDriver, AsyncGraphDatabase, Query
+from neo4j.exceptions import Neo4jError
+from neo4j.graph import Node, Path, Relationship
 
 from .config import neo4j_database, neo4j_password, neo4j_uri, neo4j_username
 
@@ -34,6 +38,15 @@ RETURN node_count, count(relationship) AS relationship_count
 
 class GraphStoreUnavailable(RuntimeError):
     """Raised when Neo4j cannot serve a storage operation."""
+
+
+class GraphReadQueryError(RuntimeError):
+    """Raised when a model-supplied graph query is invalid or not read-only."""
+
+
+GRAPH_READ_QUERY_MAX_ROWS = 100
+GRAPH_READ_QUERY_MAX_BYTES = 100_000
+GRAPH_READ_QUERY_TIMEOUT_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -77,8 +90,7 @@ class GraphRuleNeighborhood:
 
 
 @dataclass(frozen=True)
-class GraphSourceExcerpt:
-    text: str
+class GraphSourceSection:
     start: int
     end: int
 
@@ -105,7 +117,7 @@ class GraphRuleMutation:
     refines_ids: tuple[str, ...]
     exception_to_ids: tuple[str, ...]
     conflicts_with_ids: tuple[str, ...]
-    excerpts: tuple[GraphSourceExcerpt, ...]
+    source_sections: tuple[GraphSourceSection, ...]
 
 
 @dataclass(frozen=True)
@@ -226,6 +238,131 @@ def normalize_graph_key(value: str) -> str:
 def stable_graph_node_id(prefix: str, value: str) -> str:
     key = normalize_graph_key(value)
     return f"{prefix}-{sha256(key.encode('utf-8')).hexdigest()[:20]}"
+
+
+def _cypher_code_only(value: str) -> str:
+    """Mask literals, quoted identifiers and comments before clause inspection."""
+
+    result: list[str] = []
+    index = 0
+    state = "code"
+    quote = ""
+    while index < len(value):
+        current = value[index]
+        following = value[index + 1] if index + 1 < len(value) else ""
+        if state == "code":
+            if current == "/" and following == "/":
+                result.extend((" ", " "))
+                index += 2
+                state = "line_comment"
+                continue
+            if current == "/" and following == "*":
+                result.extend((" ", " "))
+                index += 2
+                state = "block_comment"
+                continue
+            if current in {"'", '"', "`"}:
+                result.append(" ")
+                index += 1
+                state = "quoted"
+                quote = current
+                continue
+            result.append(current)
+            index += 1
+            continue
+        if state == "line_comment":
+            result.append("\n" if current == "\n" else " ")
+            index += 1
+            if current == "\n":
+                state = "code"
+            continue
+        if state == "block_comment":
+            if current == "*" and following == "/":
+                result.extend((" ", " "))
+                index += 2
+                state = "code"
+            else:
+                result.append("\n" if current == "\n" else " ")
+                index += 1
+            continue
+
+        result.append(" ")
+        index += 1
+        if current == "\\" and index < len(value):
+            result.append(" ")
+            index += 1
+        elif current == quote:
+            if index < len(value) and value[index] == quote:
+                result.append(" ")
+                index += 1
+            else:
+                state = "code"
+                quote = ""
+    return "".join(result)
+
+
+def _validate_free_read_cypher(value: str) -> str:
+    cypher = value.strip()
+    if cypher.endswith(";"):
+        cypher = cypher[:-1].rstrip()
+    if not cypher:
+        raise GraphReadQueryError("cypher 不能为空")
+
+    code = _cypher_code_only(cypher)
+    if re.search(r"\bLOAD\s+CSV\b", code, re.IGNORECASE):
+        raise GraphReadQueryError("只读查询不允许使用 LOAD CSV")
+    if re.match(r"\s*(?:EXPLAIN|PROFILE)\b", code, re.IGNORECASE):
+        raise GraphReadQueryError("请直接提交查询语句，不要添加 EXPLAIN 或 PROFILE")
+    for match in re.finditer(r"\bCALL\b", code, re.IGNORECASE):
+        remainder = code[match.end() :].lstrip()
+        if remainder.startswith("{"):
+            continue
+        if remainder.startswith("("):
+            closing = remainder.find(")")
+            if closing >= 0 and remainder[closing + 1 :].lstrip().startswith("{"):
+                continue
+        raise GraphReadQueryError("只读查询不允许调用数据库过程")
+    return cypher
+
+
+def _graph_value_to_json(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Node):
+        return {
+            "element_id": value.element_id,
+            "labels": sorted(value.labels),
+            "properties": {
+                str(key): _graph_value_to_json(item) for key, item in value.items()
+            },
+        }
+    if isinstance(value, Relationship):
+        start_node = getattr(value, "start_node", None)
+        end_node = getattr(value, "end_node", None)
+        return {
+            "element_id": value.element_id,
+            "type": value.type,
+            "start_node_element_id": getattr(start_node, "element_id", None),
+            "end_node_element_id": getattr(end_node, "element_id", None),
+            "properties": {
+                str(key): _graph_value_to_json(item) for key, item in value.items()
+            },
+        }
+    if isinstance(value, Path):
+        return {
+            "nodes": [_graph_value_to_json(node) for node in value.nodes],
+            "relationships": [
+                _graph_value_to_json(relationship) for relationship in value.relationships
+            ],
+        }
+    if isinstance(value, Mapping):
+        return {str(key): _graph_value_to_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_graph_value_to_json(item) for item in value]
+    iso_format = getattr(value, "iso_format", None)
+    if callable(iso_format):
+        return iso_format()
+    return str(value)
 
 
 class GraphStore:
@@ -352,6 +489,67 @@ class GraphStore:
             for rule_id in unique_ids
         )
 
+    async def execute_read_query(self, cypher: str) -> tuple[dict[str, Any], ...]:
+        """Execute one model-supplied Cypher query after Neo4j confirms it is read-only."""
+
+        validated_cypher = _validate_free_read_cypher(cypher)
+        planned_query = Query(
+            f"EXPLAIN\n{validated_cypher}",
+            timeout=GRAPH_READ_QUERY_TIMEOUT_SECONDS,
+        )
+        bounded_query = Query(
+            "CALL () {\n"
+            f"{validated_cypher}\n"
+            "}\n"
+            "RETURN *\n"
+            f"LIMIT {GRAPH_READ_QUERY_MAX_ROWS + 1}",
+            timeout=GRAPH_READ_QUERY_TIMEOUT_SECONDS,
+        )
+        try:
+            async with self._driver.session(
+                database=self.database,
+                default_access_mode=READ_ACCESS,
+            ) as session:
+                planned_result = await session.run(planned_query)
+                plan_summary = await planned_result.consume()
+                if plan_summary.query_type != "r":
+                    raise GraphReadQueryError("只允许执行读取图谱的 Cypher 查询")
+
+                result = await session.run(bounded_query)
+                rows: list[dict[str, Any]] = []
+                response_bytes = 2
+                async for record in result:
+                    if len(rows) >= GRAPH_READ_QUERY_MAX_ROWS:
+                        raise GraphReadQueryError(
+                            f"查询结果超过 {GRAPH_READ_QUERY_MAX_ROWS} 行，请使用 WHERE、"
+                            "SKIP 或 LIMIT 缩小范围"
+                        )
+                    row = {
+                        str(key): _graph_value_to_json(value)
+                        for key, value in record.items()
+                    }
+                    response_bytes += len(
+                        json.dumps(
+                            row,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    )
+                    if response_bytes > GRAPH_READ_QUERY_MAX_BYTES:
+                        raise GraphReadQueryError(
+                            "查询结果内容过大，请减少返回字段或缩小查询范围"
+                        )
+                    rows.append(row)
+                await result.consume()
+        except GraphReadQueryError:
+            raise
+        except Neo4jError as exc:
+            detail = getattr(exc, "message", None) or str(exc)
+            raise GraphReadQueryError(f"Cypher 查询失败：{detail}") from exc
+        except Exception as exc:
+            raise GraphStoreUnavailable("无法执行 Neo4j 只读查询") from exc
+        return tuple(rows)
+
     async def snapshot(self) -> GraphSnapshot:
         try:
             async with self._driver.session(database=self.database) as session:
@@ -454,10 +652,12 @@ class GraphStore:
                                     values = coalesce(relation.job_ids, []), value IN [$job_id] |
                                     CASE WHEN value IN values THEN values ELSE values + value END
                                 ),
-                                relation.excerpts = reduce(
-                                    values = coalesce(relation.excerpts, []), value IN $excerpts |
+                                relation.section_ranges = reduce(
+                                    values = coalesce(relation.section_ranges, []),
+                                    value IN $section_ranges |
                                     CASE WHEN value IN values THEN values ELSE values + value END
                                 )
+                            REMOVE relation.excerpts
                             """,
                             id=rule.id,
                             name=rule.name,
@@ -465,13 +665,17 @@ class GraphStore:
                             aliases=list(rule.aliases),
                             document_id=document_id,
                             job_id=job_id,
-                            excerpts=[
+                            section_ranges=[
                                 json.dumps(
-                                    {"text": item.text, "start": item.start, "end": item.end},
+                                    {
+                                        "job_id": job_id,
+                                        "start": item.start,
+                                        "end": item.end,
+                                    },
                                     ensure_ascii=False,
                                     separators=(",", ":"),
                                 )
-                                for item in rule.excerpts
+                                for item in rule.source_sections
                             ],
                         )
                         await rule_result.consume()

@@ -7,6 +7,7 @@ from app.agent_tools import (
     AgentTool,
     AgentToolAuthorizationError,
     AgentToolExecutionError,
+    AgentToolInputError,
     AgentToolRegistry,
 )
 
@@ -101,3 +102,31 @@ async def test_registry_dispatches_async_tools_without_breaking_sync_tools() -> 
     assert registry.is_terminal("async_echo") is True
     with pytest.raises(AgentToolExecutionError, match="异步工具"):
         registry.dispatch("async_echo", '{"value":"hello"}')
+
+
+@pytest.mark.asyncio
+async def test_terminal_tool_can_return_detailed_input_error_without_terminating() -> None:
+    def reject(_payload: BaseModel) -> BaseModel:
+        raise AgentToolInputError("value：不在允许范围内。")
+
+    tool = AgentTool(
+        name="submit",
+        description="Submit one value.",
+        input_schema=EchoInput.model_json_schema(),
+        input_model=EchoInput,
+        execute=reject,
+        terminal=True,
+        return_input_errors=True,
+    )
+    registry = AgentToolRegistry([tool])
+
+    invalid_schema = await registry.dispatch_async("submit", "{}")
+    rejected_value = await registry.dispatch_async("submit", '{"value":"bad"}')
+
+    assert invalid_schema.input == {}
+    assert "value：Field required" in invalid_schema.output["error"]
+    assert invalid_schema.terminal is False
+    assert rejected_value.input == {"value": "bad"}
+    assert "value：不在允许范围内" in rejected_value.output["error"]
+    assert "重新调用 submit" in rejected_value.output["error"]
+    assert rejected_value.terminal is False

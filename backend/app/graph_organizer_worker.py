@@ -19,7 +19,10 @@ from .graph_organizer import (
     extract_graph_section,
     split_document_sections,
 )
-from .graph_organizer_repository import ACTIVE_GRAPH_JOB_STATUSES
+from .graph_organizer_repository import (
+    RUNNABLE_GRAPH_JOB_STATUSES,
+    UNFINISHED_GRAPH_JOB_STATUSES,
+)
 from .graph_store import GraphApplyResult, GraphStore, graph_store
 from .knowledge import KnowledgeRepository, decode_stored_txt
 from .models import GraphOrganizingJob, GraphOrganizingTrace, KnowledgeDocument
@@ -36,7 +39,7 @@ class GraphJobInputs:
 async def _load_job_inputs(job_id: UUID) -> GraphJobInputs | None:
     async with SessionFactory() as session:
         job = await session.get(GraphOrganizingJob, job_id)
-        if job is None or job.status not in ACTIVE_GRAPH_JOB_STATUSES:
+        if job is None or job.status not in RUNNABLE_GRAPH_JOB_STATUSES:
             return None
         document = await KnowledgeRepository(session).get_document(
             job.document_id,
@@ -63,11 +66,15 @@ async def _job_snapshot(job_id: UUID) -> GraphOrganizingJob | None:
         return await session.get(GraphOrganizingJob, job_id)
 
 
-async def _begin_analysis(job_id: UUID, total_sections: int) -> None:
+async def _begin_analysis(job_id: UUID, total_sections: int) -> bool:
     async with SessionFactory() as session:
-        job = await session.get(GraphOrganizingJob, job_id)
-        if job is None:
-            return
+        job = await session.scalar(
+            select(GraphOrganizingJob)
+            .where(GraphOrganizingJob.id == job_id)
+            .with_for_update()
+        )
+        if job is None or job.status not in RUNNABLE_GRAPH_JOB_STATUSES:
+            return False
         if job.started_at is None:
             job.processed_sections = 0
             job.current_offset = 0
@@ -86,6 +93,28 @@ async def _begin_analysis(job_id: UUID, total_sections: int) -> None:
         job.started_at = job.started_at or utc_now()
         job.finished_at = None
         await session.commit()
+        return True
+
+
+async def _pause_at_section_boundary(job_id: UUID) -> bool:
+    async with SessionFactory() as session:
+        job = await session.scalar(
+            select(GraphOrganizingJob)
+            .where(GraphOrganizingJob.id == job_id)
+            .with_for_update()
+        )
+        if job is None:
+            return True
+        if job.status == "pause_requested":
+            job.status = "paused"
+            await session.commit()
+            return True
+        if job.status == "cancel_requested":
+            job.status = "cancelled"
+            job.finished_at = utc_now()
+            await session.commit()
+            return True
+        return job.status != "analyzing"
 
 
 async def _record_section(
@@ -169,8 +198,23 @@ async def _record_trace_attempt(
 
 async def _mark_applied(job_id: UUID) -> None:
     async with SessionFactory() as session:
-        job = await session.get(GraphOrganizingJob, job_id)
+        job = await session.scalar(
+            select(GraphOrganizingJob)
+            .where(GraphOrganizingJob.id == job_id)
+            .with_for_update()
+        )
         if job is None:
+            return
+        if job.status == "pause_requested":
+            job.status = "paused"
+            await session.commit()
+            return
+        if job.status == "cancel_requested":
+            job.status = "cancelled"
+            job.finished_at = utc_now()
+            await session.commit()
+            return
+        if job.status != "analyzing":
             return
         job.status = "applied"
         job.finished_at = utc_now()
@@ -179,8 +223,17 @@ async def _mark_applied(job_id: UUID) -> None:
 
 async def _mark_failed(job_id: UUID, message: str) -> None:
     async with SessionFactory() as session:
-        job = await session.get(GraphOrganizingJob, job_id)
+        job = await session.scalar(
+            select(GraphOrganizingJob)
+            .where(GraphOrganizingJob.id == job_id)
+            .with_for_update()
+        )
         if job is None:
+            return
+        if job.status == "cancel_requested":
+            job.status = "cancelled"
+            job.finished_at = utc_now()
+            await session.commit()
             return
         job.status = "failed"
         job.failure_message = message[:2000]
@@ -188,12 +241,20 @@ async def _mark_failed(job_id: UUID, message: str) -> None:
         await session.commit()
 
 
-async def _mark_queued_after_cancel(job_id: UUID) -> None:
+async def _mark_after_task_cancel(job_id: UUID) -> None:
     async with SessionFactory() as session:
         job = await session.get(GraphOrganizingJob, job_id)
-        if job is None or job.status not in ACTIVE_GRAPH_JOB_STATUSES:
+        if job is None:
             return
-        job.status = "queued"
+        if job.status == "analyzing":
+            job.status = "queued"
+        elif job.status == "pause_requested":
+            job.status = "paused"
+        elif job.status == "cancel_requested":
+            job.status = "cancelled"
+            job.finished_at = utc_now()
+        else:
+            return
         await session.commit()
 
 
@@ -274,7 +335,10 @@ async def execute_graph_organizing_job(
         text = decode_stored_txt(inputs.document.file_data, inputs.document.encoding)
         sections = split_document_sections(text)
         resume_offset = job.current_offset
-        await _begin_analysis(job_id, len(sections))
+        if not await _begin_analysis(job_id, len(sections)):
+            return
+        if await _pause_at_section_boundary(job_id):
+            return
         timeout = httpx.Timeout(None, connect=15.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
             for section in sections:
@@ -312,9 +376,11 @@ async def execute_graph_organizing_job(
                     output_tokens=prior_output + result.output_tokens,
                     apply_result=result.apply_result,
                 )
+                if await _pause_at_section_boundary(job_id):
+                    return
         await _mark_applied(job_id)
     except asyncio.CancelledError:
-        await _mark_queued_after_cancel(job_id)
+        await _mark_after_task_cancel(job_id)
         raise
     except Exception as exc:
         await _mark_failed(job_id, f"自动整理失败：{exc}")
@@ -325,6 +391,7 @@ class GraphOrganizerTaskManager:
         self._queue: asyncio.Queue[UUID] = asyncio.Queue()
         self._queued: set[UUID] = set()
         self._worker_task: asyncio.Task[None] | None = None
+        self._current_job_id: UUID | None = None
 
     def _ensure_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():
@@ -335,16 +402,22 @@ class GraphOrganizerTaskManager:
         async with SessionFactory() as session:
             result = await session.execute(
                 select(GraphOrganizingJob)
-                .where(GraphOrganizingJob.status.in_(ACTIVE_GRAPH_JOB_STATUSES))
+                .where(GraphOrganizingJob.status.in_(UNFINISHED_GRAPH_JOB_STATUSES))
                 .order_by(GraphOrganizingJob.created_at)
             )
             jobs = list(result.scalars())
             for job in jobs:
                 if job.status == "analyzing":
                     job.status = "queued"
+                elif job.status == "pause_requested":
+                    job.status = "paused"
+                elif job.status == "cancel_requested":
+                    job.status = "cancelled"
+                    job.finished_at = utc_now()
             await session.commit()
         for job in jobs:
-            await self.enqueue(job.id)
+            if job.status == "queued":
+                await self.enqueue(job.id)
 
     async def enqueue(self, job_id: UUID) -> None:
         self._ensure_worker()
@@ -352,6 +425,20 @@ class GraphOrganizerTaskManager:
             return
         self._queued.add(job_id)
         await self._queue.put(job_id)
+
+    async def cancel(self, job_id: UUID) -> bool:
+        task = self._worker_task
+        if self._current_job_id != job_id or task is None or task.done():
+            return False
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        if self._worker_task is task:
+            self._worker_task = None
+        self._ensure_worker()
+        return True
 
     async def stop(self) -> None:
         if self._worker_task is not None:
@@ -361,18 +448,21 @@ class GraphOrganizerTaskManager:
             except asyncio.CancelledError:
                 pass
         self._worker_task = None
+        self._current_job_id = None
         self._queue = asyncio.Queue()
         self._queued.clear()
 
     async def _worker_loop(self) -> None:
         while True:
             job_id = await self._queue.get()
+            self._queued.discard(job_id)
+            self._current_job_id = job_id
             try:
                 await execute_graph_organizing_job(job_id)
             except Exception as exc:
                 await _mark_failed(job_id, f"后台自动整理失败：{exc}")
             finally:
-                self._queued.discard(job_id)
+                self._current_job_id = None
                 self._queue.task_done()
 
 

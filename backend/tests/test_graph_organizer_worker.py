@@ -1,4 +1,6 @@
+import asyncio
 from hashlib import sha256
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -10,7 +12,7 @@ from app.graph_organizer import (
     GraphOrganizerModelError,
     GraphSectionResult,
 )
-from app.graph_organizer_worker import execute_graph_organizing_job
+from app.graph_organizer_worker import GraphOrganizerTaskManager, execute_graph_organizing_job
 from app.graph_store import GraphApplyResult
 from app.models import (
     GraphOrganizingJob,
@@ -90,7 +92,7 @@ async def create_job(session_factory, text: str) -> GraphOrganizingJob:
         return job
 
 
-def one_rule(excerpt: str) -> ExtractedGraphRule:
+def one_rule() -> ExtractedGraphRule:
     return ExtractedGraphRule(
         name="身旺任财",
         summary="身旺时较能任财。",
@@ -101,7 +103,6 @@ def one_rule(excerpt: str) -> ExtractedGraphRule:
         weakened_by=[],
         outcomes=["任财"],
         does_not_prove=[],
-        source_excerpt=excerpt,
         existing_rule_id="",
         rule_links=[],
     )
@@ -122,7 +123,7 @@ async def test_worker_records_each_section_after_submit_has_written_it(
         assert kwargs["context"].store is store
         assert kwargs["api_key"] == "test-api-key"
         return GraphSectionResult(
-            extraction=GraphExtractionOutput(rules=[one_rule("身旺方能任财")]),
+            extraction=GraphExtractionOutput(rules=[one_rule()]),
             apply_result=GraphApplyResult(
                 rules_created=1,
                 rules_merged=0,
@@ -235,7 +236,7 @@ async def test_worker_keeps_completed_section_when_later_submit_fails(
                 retryable=False,
             )
         return GraphSectionResult(
-            extraction=GraphExtractionOutput(rules=[one_rule("第一段")]),
+            extraction=GraphExtractionOutput(rules=[one_rule()]),
             apply_result=GraphApplyResult(1, 0, 1, 3, 0),
             input_tokens=10,
             output_tokens=5,
@@ -272,3 +273,131 @@ async def test_worker_keeps_completed_section_when_later_submit_fails(
             ).all()
         )
         assert [trace.status for trace in traces] == ["completed", "failed"]
+
+
+@pytest.mark.asyncio
+async def test_worker_pauses_at_section_boundary_and_resumes_from_saved_offset(
+    database_client,
+    monkeypatch,
+) -> None:
+    _, session_factory = database_client
+    job = await create_job(session_factory, "第一段。第二段。")
+    store = FakeGraphStore()
+    sections = (
+        DocumentSection(index=0, start=0, end=4, text="第一段。"),
+        DocumentSection(index=1, start=4, end=8, text="第二段。"),
+    )
+    extracted_sections = []
+
+    async def pausing_extract(**kwargs):
+        section = kwargs["context"].section
+        extracted_sections.append(section.index)
+        if section.index == 0:
+            async with session_factory() as session:
+                stored = await session.get(GraphOrganizingJob, job.id)
+                assert stored is not None
+                stored.status = "pause_requested"
+                await session.commit()
+        return GraphSectionResult(
+            extraction=GraphExtractionOutput(rules=[one_rule()]),
+            apply_result=GraphApplyResult(1, 0, 1, 3, 0),
+            input_tokens=10,
+            output_tokens=5,
+        )
+
+    monkeypatch.setattr("app.graph_organizer_worker.SessionFactory", session_factory)
+    monkeypatch.setattr("app.graph_organizer_worker.SecretCipher", FakeCipher)
+    monkeypatch.setattr(
+        "app.graph_organizer_worker.split_document_sections",
+        lambda _text: sections,
+    )
+    monkeypatch.setattr(
+        "app.graph_organizer_worker.extract_graph_section",
+        pausing_extract,
+    )
+
+    await execute_graph_organizing_job(job.id, store=store)
+
+    async with session_factory() as session:
+        paused = await session.get(GraphOrganizingJob, job.id)
+        assert paused is not None
+        assert paused.status == "paused"
+        assert paused.processed_sections == 1
+        assert paused.current_offset == 4
+        paused.status = "queued"
+        await session.commit()
+
+    await execute_graph_organizing_job(job.id, store=store)
+
+    async with session_factory() as session:
+        applied = await session.get(GraphOrganizingJob, job.id)
+        assert applied is not None
+        assert applied.status == "applied"
+        assert applied.processed_sections == 2
+        assert applied.current_offset == 8
+        assert applied.rules_created == 2
+    assert extracted_sections == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_worker_cancellation_marks_requested_job_cancelled(
+    database_client,
+    monkeypatch,
+) -> None:
+    _, session_factory = database_client
+    job = await create_job(session_factory, "正在分析的资料。")
+    started = asyncio.Event()
+
+    async def blocking_extract(**_kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.graph_organizer_worker.SessionFactory", session_factory)
+    monkeypatch.setattr("app.graph_organizer_worker.SecretCipher", FakeCipher)
+    monkeypatch.setattr("app.graph_organizer_worker.extract_graph_section", blocking_extract)
+
+    task = asyncio.create_task(execute_graph_organizing_job(job.id, store=FakeGraphStore()))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    async with session_factory() as session:
+        stored = await session.get(GraphOrganizingJob, job.id)
+        assert stored is not None
+        stored.status = "cancel_requested"
+        await session.commit()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    async with session_factory() as session:
+        cancelled = await session.get(GraphOrganizingJob, job.id)
+        assert cancelled is not None
+        assert cancelled.status == "cancelled"
+        assert cancelled.finished_at is not None
+        assert cancelled.processed_sections == 0
+
+
+@pytest.mark.asyncio
+async def test_task_manager_cancel_interrupts_current_job_and_restarts_worker(
+    monkeypatch,
+) -> None:
+    manager = GraphOrganizerTaskManager()
+    job_id = uuid4()
+    started = asyncio.Event()
+    interrupted = asyncio.Event()
+
+    async def blocking_job(_job_id):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            interrupted.set()
+
+    monkeypatch.setattr("app.graph_organizer_worker.execute_graph_organizing_job", blocking_job)
+    try:
+        await manager.enqueue(job_id)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert await manager.cancel(job_id) is True
+        await asyncio.wait_for(interrupted.wait(), timeout=1)
+        assert manager._worker_task is not None
+        assert not manager._worker_task.done()
+    finally:
+        await manager.stop()

@@ -40,6 +40,7 @@ class AgentTool:
     execute: Callable[[BaseModel], BaseModel | Awaitable[BaseModel]]
     authorize: Callable[[BaseModel], None] | None = None
     terminal: bool = False
+    return_input_errors: bool = False
 
     def responses_definition(self) -> dict[str, Any]:
         return {
@@ -119,13 +120,57 @@ class AgentToolRegistry:
 
         try:
             raw_arguments = json.loads(arguments)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise AgentToolInputError("参数不是有效的 JSON。") from exc
+        try:
             tool_input = tool.input_model.model_validate(raw_arguments)
-        except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
-            raise AgentToolInputError(f"模型生成的 {name} 工具参数无效。") from exc
+        except ValidationError as exc:
+            details = []
+            for error in exc.errors(include_url=False)[:10]:
+                location = ".".join(str(value) for value in error["loc"])
+                details.append(f"{location or '参数'}：{error['msg']}")
+            remaining = len(exc.errors()) - len(details)
+            if remaining > 0:
+                details.append(f"另有 {remaining} 处错误")
+            raise AgentToolInputError(
+                f"参数校验未通过：{'；'.join(details)}。"
+            ) from exc
 
         if tool.authorize is not None:
             tool.authorize(tool_input)
         return tool, tool_input
+
+    @staticmethod
+    def _unvalidated_input(arguments: str) -> dict[str, Any]:
+        try:
+            value = json.loads(arguments)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {"arguments": arguments}
+        return value if isinstance(value, dict) else {"arguments": value}
+
+    @classmethod
+    def _input_error_result(
+        cls,
+        tool: AgentTool,
+        arguments: str,
+        error: AgentToolInputError,
+        tool_input: BaseModel | None = None,
+    ) -> AgentToolDispatchResult:
+        return AgentToolDispatchResult(
+            name=tool.name,
+            input=(
+                tool_input.model_dump(mode="json")
+                if tool_input is not None
+                else cls._unvalidated_input(arguments)
+            ),
+            output={
+                "error": (
+                    f"{tool.name} 提交失败：{error}请修正上述错误后重新调用"
+                    f" {tool.name}。"
+                )
+            },
+            terminal=False,
+        )
 
     @staticmethod
     def _dispatch_result(
@@ -141,7 +186,13 @@ class AgentToolRegistry:
         )
 
     def dispatch(self, name: str, arguments: str) -> AgentToolDispatchResult:
-        tool, tool_input = self._validated_call(name, arguments)
+        try:
+            tool, tool_input = self._validated_call(name, arguments)
+        except AgentToolInputError as exc:
+            tool = self._tools[name]
+            if tool.return_input_errors:
+                return self._input_error_result(tool, arguments, exc)
+            raise
         try:
             tool_output = tool.execute(tool_input)
             if isawaitable(tool_output):
@@ -151,6 +202,10 @@ class AgentToolRegistry:
                 raise AgentToolExecutionError(
                     f"{name} 是异步工具，必须通过异步 Agent 调度器执行。"
                 )
+        except AgentToolInputError as exc:
+            if tool.return_input_errors:
+                return self._input_error_result(tool, arguments, exc, tool_input)
+            raise
         except AgentToolError:
             raise
         except Exception as exc:
@@ -158,11 +213,21 @@ class AgentToolRegistry:
         return self._dispatch_result(tool, tool_input, tool_output)
 
     async def dispatch_async(self, name: str, arguments: str) -> AgentToolDispatchResult:
-        tool, tool_input = self._validated_call(name, arguments)
+        try:
+            tool, tool_input = self._validated_call(name, arguments)
+        except AgentToolInputError as exc:
+            tool = self._tools[name]
+            if tool.return_input_errors:
+                return self._input_error_result(tool, arguments, exc)
+            raise
         try:
             tool_output = tool.execute(tool_input)
             if isawaitable(tool_output):
                 tool_output = await tool_output
+        except AgentToolInputError as exc:
+            if tool.return_input_errors:
+                return self._input_error_result(tool, arguments, exc, tool_input)
+            raise
         except AgentToolError:
             raise
         except Exception as exc:
