@@ -9,7 +9,7 @@ from typing import Any
 from ...bazi.tool import BaziChartToolInput, BaziChartToolResult, run_bazi_chart_tool
 from .dataset import EvaluationQuestion
 
-PROMPT_VERSION = "mingli-eval-v10-knowledge-tools"
+PROMPT_VERSION = "mingli-eval-v11-rule-graph"
 YEAR_PATTERN = re.compile(r"(?<!\d)(?:18|19|20)\d{2}(?!\d)")
 
 SYSTEM_PROMPT = """你是天序八字选择题 Agent。

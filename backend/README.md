@@ -120,12 +120,15 @@ HttpOnly Cookie。普通用户可以排盘和生成报告；管理员额外负�
 调用 `calculate_fortune_at` 获取。知识库有资料时，系统提示词附加动态书目，Agent 可以通过
 `search_knowledge` 搜索多个精确短语，再用 `read_knowledge` 按临时游标读取原文前后页。系统
 不建立固定切片或向量索引，只向模型返回命中上下文和实际读取页面；cursor 仅用于本次运行的阅读定位和翻页。
+报告 Agent 同时注册 `RuleGraphReadCapability`，可用 `search_rule_graph` 查询结构化规则，或用
+`query_rule_graph` 按工具描述中的图谱 Schema 执行自由的只读 Cypher；它没有图谱写入工具。
 当前仍不保留对话历史。
 
 知识库通过通用 `AgentCapability` 接口接入执行器。能力实例一次注册后，执行器自动附加动态
 提示词、合并能力工具，并在模型给出最终答案后运行能力自己的校验器。`KnowledgeCapability`
 同时封装书目、全文搜索和游标阅读；实例按请求创建，不能跨 Agent
-运行共享游标。以后新增问答或资料研究 Agent 时，无需重复拼装这套知识逻辑。
+运行共享游标。`RuleGraphReadCapability` 同时封装实时规则搜索和只读 Cypher；实例按请求创建，
+共享 Neo4j Driver 但不保存图谱快照。以后新增问答或资料研究 Agent 时，只需注册所需能力包。
 
 管理员生成报告时同时返回 `debug_trace`，用于展示模型请求、工具执行、工具结果、最终答案和
 输出校验链路，并按实际响应轮数保存每次模型请求快照。普通用户的成功和失败响应都不包含执行
@@ -292,8 +295,10 @@ SHA-256。评测使用题面钟表时间、不作地点或真太阳时修正，�
 本次运行允许模型调用的工具。用户提示词只用自然文本传入原始
 出生资料、性别、作为已归一化排盘时间使用的题面钟表时间、题目和选项；排盘工具说明仅放在
 API 的 `tools` 字段中。评测开始时加载一次当前知识库快照，每个题目使用独立的
-`KnowledgeCapability` 和 cursor 会话。模型可以直接返回 Final，也可以按需调用
-`calculate_bazi_chart`、`search_knowledge` 和 `read_knowledge`。
+`KnowledgeCapability`、cursor 会话和 `RuleGraphReadCapability`；知识库资料沿用该次评测的
+加载结果，图谱工具每次调用都读取当前 Neo4j。模型可以直接返回 Final，也可以按需调用
+`calculate_bazi_chart`、`search_knowledge`、`read_knowledge`、`search_rule_graph` 和
+`query_rule_graph`；评测 Agent 没有 `submit_rule_graph`。
 工具 Observation 只包含原局，不包含大运、流年或流月。单轮可发起多个工具调用，工具调用
 数量和模型响应轮数不设固定上限。后端会累加所有响应轮次和重试的 Token，
 并在评测调用链路中按“系统提示词、用户提示词、请求体 N、原始响应 N”的顺序展示实际轮次。

@@ -14,6 +14,7 @@ from ..credentials import (
     ModelCredentialRepository,
     get_credential_repository,
 )
+from ..graph_store import GraphStoreDependency
 from ..knowledge import KnowledgeRepositoryDependency
 from ..knowledge_capability import KnowledgeCapability
 from ..knowledge_tools import KnowledgeToolSession
@@ -27,6 +28,7 @@ from ..reports import (
     generate_structured_report,
     test_model_connection,
 )
+from ..rule_graph_capability import RuleGraphReadCapability
 from ..schemas import (
     AgentDebugTrace,
     AgentModelCallDebug,
@@ -306,6 +308,7 @@ async def generate_report(
     payload: BirthInput,
     repository: CredentialRepositoryDependency,
     knowledge_repository: KnowledgeRepositoryDependency,
+    graph_store: GraphStoreDependency,
     user: ReadyUserDependency,
 ) -> ReportGenerationResponse:
     try:
@@ -319,6 +322,7 @@ async def generate_report(
     knowledge_capability = KnowledgeCapability(
         KnowledgeToolSession(await knowledge_repository.list_agent_documents())
     )
+    rule_graph_capability = RuleGraphReadCapability(graph_store)
     try:
         api_key = SecretCipher.from_environment().decrypt(
             credential.encrypted_api_key,
@@ -329,7 +333,7 @@ async def generate_report(
             chart=chart,
             credential=credential,
             api_key=api_key,
-            capabilities=(knowledge_capability,),
+            capabilities=(knowledge_capability, rule_graph_capability),
         )
     except SecretEncryptionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

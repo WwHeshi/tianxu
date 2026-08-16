@@ -13,10 +13,12 @@ from ...auth import utc_now
 from ...bazi.tool import BaziChartToolResult
 from ...credentials import LOCAL_CREDENTIAL_SCOPE, ModelCredentialRepository
 from ...database import SessionFactory
+from ...graph_store import graph_store
 from ...knowledge import KnowledgeRepository
 from ...knowledge_capability import KnowledgeCapability
 from ...knowledge_tools import KnowledgeToolSession
 from ...models import EvaluationItem, EvaluationRun, KnowledgeDocument
+from ...rule_graph_capability import RuleGraphReadCapability
 from ...security import SecretCipher
 from .context import build_evaluation_prompt
 from .dataset import EvaluationQuestion, load_dataset
@@ -171,6 +173,7 @@ async def _score_one(
                 chart_cache=chart_cache,
                 capabilities=(
                     KnowledgeCapability(KnowledgeToolSession(list(knowledge_documents))),
+                    RuleGraphReadCapability(graph_store),
                 ),
             )
             predicted = result.answer.answer

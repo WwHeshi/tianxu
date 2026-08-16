@@ -30,7 +30,7 @@ from .tool_calling_agent import (
     run_tool_calling_agent,
 )
 
-PROMPT_VERSION = "bazi-report-v20-knowledge-tools"
+PROMPT_VERSION = "bazi-report-v21-rule-graph"
 REPORT_SCHEMA_VERSION = "v1"
 MODEL_TIMEOUT_SECONDS = 90.0
 CONNECTION_TEST_TIMEOUT_SECONDS = 20.0

@@ -7,7 +7,6 @@ from app.agent_capabilities import AgentCapabilityOutputError
 from app.agent_tools import AgentToolRegistry
 from app.graph_organizer import (
     GRAPH_ORGANIZER_INSTRUCTIONS,
-    RULE_GRAPH_QUERY_TOOL_DESCRIPTION,
     DocumentSection,
     ExtractedConditionGroup,
     ExtractedGraphRule,
@@ -27,6 +26,7 @@ from app.graph_store import (
     GraphRuleSummary,
     stable_graph_node_id,
 )
+from app.rule_graph_capability import RULE_GRAPH_QUERY_TOOL_DESCRIPTION
 
 
 class FakeLiveGraphStore:

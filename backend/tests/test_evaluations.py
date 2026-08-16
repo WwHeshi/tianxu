@@ -28,6 +28,7 @@ from app.evals.mingli_bench.repository import EvaluationRepository
 from app.knowledge_capability import KnowledgeCapability
 from app.knowledge_tools import KnowledgeToolSession
 from app.models import EvaluationItem, EvaluationRun, KnowledgeDocument, ModelCredential
+from app.rule_graph_capability import RuleGraphReadCapability
 
 
 async def _create_admin(
@@ -624,7 +625,7 @@ async def test_worker_persists_score_and_progress(
             api_protocol="responses",
             model="test-model",
             base_url="https://example.test/v1",
-            prompt_version="mingli-eval-v10-knowledge-tools",
+            prompt_version="mingli-eval-v11-rule-graph",
             engine_version="test",
             calculation_policy_version="v2",
             total_questions=1,
@@ -654,7 +655,13 @@ async def test_worker_persists_score_and_progress(
     async def fake_model_call(**_kwargs) -> EvaluationModelResult:
         capabilities = _kwargs["capabilities"]
         assert isinstance(capabilities, tuple)
-        assert len(capabilities) == 1
+        assert len(capabilities) == 2
+        assert isinstance(capabilities[0], KnowledgeCapability)
+        assert isinstance(capabilities[1], RuleGraphReadCapability)
+        assert [tool.name for tool in capabilities[1].tools()] == [
+            "search_rule_graph",
+            "query_rule_graph",
+        ]
         knowledge_prompts.append(capabilities[0].prompt_section())
         async with session_factory() as session:
             active_item = await session.get(EvaluationItem, created_item_id)

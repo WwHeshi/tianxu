@@ -27,6 +27,7 @@ from app.reports import (
 from app.reports import (
     test_model_connection as probe_model_connection,
 )
+from app.rule_graph_capability import RuleGraphReadCapability
 from app.schemas import BaziReport, BirthInput
 from app.security import SecretCipher, SecretEncryptionError
 from app.tool_calling_agent import model_response_history_items
@@ -321,7 +322,7 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     data = response.json()
     assert data["metadata"]["model"] == "test-model"
     assert data["metadata"]["api_protocol"] == "responses"
-    assert data["metadata"]["prompt_version"] == "bazi-report-v20-knowledge-tools"
+    assert data["metadata"]["prompt_version"] == "bazi-report-v21-rule-graph"
     assert "knowledge_version" not in data["metadata"]
     assert "citations" not in data
     assert data["chart"]["chart"]["pillars"]["day"]["gan_zhi"] == "丙寅"
@@ -331,6 +332,15 @@ async def test_report_recalculates_chart_server_side_and_returns_metadata(
     assert data["debug_trace"]["system_prompt"] == "system prompt"
     assert "sk-test-super-secret-6789" not in response.text
     assert captured["api_key"] == "sk-test-super-secret-6789"
+    capabilities = captured["capabilities"]
+    assert isinstance(capabilities, tuple)
+    assert len(capabilities) == 2
+    assert isinstance(capabilities[0], KnowledgeCapability)
+    assert isinstance(capabilities[1], RuleGraphReadCapability)
+    assert [tool.name for tool in capabilities[1].tools()] == [
+        "search_rule_graph",
+        "query_rule_graph",
+    ]
 
     app.dependency_overrides[get_current_user] = lambda: authenticated_user("user")
     user_response = await client.post("/api/v1/reports/generate", json=valid_payload())
