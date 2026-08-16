@@ -516,8 +516,7 @@ async def test_graph_search_prefers_complete_multi_condition_coverage() -> None:
     )
 
     assert [rule.id for rule in result.root[0].rules] == ["R-complete", "R-single"]
-    assert result.root[0].rules[0].score == 135
-    assert result.root[0].rules[1].score == 125
+    assert result.root[0].rules[0].score > result.root[0].rules[1].score
     assert [
         (match.kind, match.name, match.match)
         for match in result.root[0].rules[0].matched_on

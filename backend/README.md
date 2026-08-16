@@ -78,7 +78,16 @@ uv run pytest
 - `GET /api/v1/admin/graph/jobs/{job_id}/traces/{trace_id}`
 
 图谱接口只对管理员开放：快照接口直接读取 Neo4j 的真实节点和关系，任务接口把选定 TXT
-交给整理 Agent。`search_rule_graph` 每次直接读取当前 Neo4j；`query_rule_graph` 根据工具描述
+交给整理 Agent。`search_rule_graph` 每次直接读取当前 Neo4j，并将名称或别名精确匹配、中文
+BM25 前 30 条和本地原版 `bge-base-zh-v1.5` 向量前 30 条通过 RRF 融合，最终仍返回前 5 条；
+模型使用 ONNX Runtime 在 CPU 本地批量运行，查询侧附加 BGE 中文检索指令；
+失败时自动退化为精确匹配和 BM25。规则向量使用进程内增量缓存，新增或变化的规则才会重算，
+后端重启时会从真实图谱重新预热。Embedding 文件位于
+`../external/models/bge-base-zh-v1.5`；Docker 构建只复制 Embedding，不会联网下载模型，
+非量化 FP32 ONNX 由 Xenova 从 BAAI 原始权重转换。模型目录由 `.gitignore` 排除，不使用
+Git LFS；新环境需人工放置固定版本 `71e50dc531959f9e04ebf190ea25b00261a0a186` 的
+`onnx/model.onnx` 和 `tokenizer.json`。Docker 构建不校验模型哈希。
+`query_rule_graph` 根据工具描述
 内置的图谱 Schema 执行自由的只读 Cypher，可用于多跳、路径和聚合查询；每段提取结果通过
 `submit_rule_graph` 提交，后端自动附加当前片段范围后，立即通过固定 Cypher 在单个事务中融合
 该批规则，并把结果返回同一 Session。Agent 确认没有遗漏并停止调用工具后才结束本段；同一

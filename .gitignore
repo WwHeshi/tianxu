@@ -40,6 +40,9 @@ build/
 coverage/
 *.egg-info/
 
+# Local embedding models (downloaded manually, never committed)
+external/models/
+
 # Local databases and runtime files
 *.sqlite
 *.sqlite3

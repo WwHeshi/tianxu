@@ -38,7 +38,8 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: "${COMPOSE_DATABASE_URL:-postgresql+asyncpg://tianxu:tianxu_dev_password@postgres:5432/tianxu}"
@@ -50,6 +51,8 @@ services:
       NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-tianxu_neo4j_dev_password}
       NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+      RULE_GRAPH_EMBEDDING_ENABLED: ${RULE_GRAPH_EMBEDDING_ENABLED:-true}
+      RULE_GRAPH_EMBEDDING_MODEL: ${RULE_GRAPH_EMBEDDING_MODEL:-BAAI/bge-base-zh-v1.5}
       GRAPH_ORGANIZER_SECTION_TIMEOUT_SECONDS: ${GRAPH_ORGANIZER_SECTION_TIMEOUT_SECONDS:-600}
     ports:
       - "${BACKEND_PORT:-8000}:8000"

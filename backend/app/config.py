@@ -8,6 +8,8 @@ DEFAULT_NEO4J_USERNAME = "neo4j"
 DEFAULT_NEO4J_PASSWORD = "tianxu_neo4j_dev_password"
 DEFAULT_NEO4J_DATABASE = "neo4j"
 DEFAULT_GRAPH_ORGANIZER_SECTION_TIMEOUT_SECONDS = 600.0
+DEFAULT_RULE_GRAPH_EMBEDDING_MODEL = "BAAI/bge-base-zh-v1.5"
+DEFAULT_RULE_GRAPH_EMBEDDING_MODEL_PATH = "/opt/models/bge-base-zh-v1.5"
 
 
 def database_url() -> str:
@@ -46,6 +48,30 @@ def graph_organizer_section_timeout_seconds() -> float:
             "GRAPH_ORGANIZER_SECTION_TIMEOUT_SECONDS must be greater than zero"
         )
     return value
+
+
+def rule_graph_embedding_model() -> str:
+    return os.getenv(
+        "RULE_GRAPH_EMBEDDING_MODEL",
+        DEFAULT_RULE_GRAPH_EMBEDDING_MODEL,
+    ).strip()
+
+
+def rule_graph_embedding_model_path() -> str | None:
+    value = os.getenv(
+        "RULE_GRAPH_EMBEDDING_MODEL_PATH",
+        DEFAULT_RULE_GRAPH_EMBEDDING_MODEL_PATH,
+    ).strip()
+    return value or None
+
+
+def rule_graph_embedding_enabled() -> bool:
+    value = os.getenv("RULE_GRAPH_EMBEDDING_ENABLED", "true").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("RULE_GRAPH_EMBEDDING_ENABLED must be true or false")
 
 
 def app_environment() -> str:

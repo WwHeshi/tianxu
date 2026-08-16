@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.pyc
+frontend
+docs
+external/*
+!external/models
+external/models/*
+!external/models/bge-base-zh-v1.5
+!external/models/bge-base-zh-v1.5/**
+external/models/bge-base-zh-v1.5/.cache

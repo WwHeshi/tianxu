@@ -1,19 +1,32 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+
+ENV UV_COMPILE_BYTECODE=0 \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
+
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN uv sync --frozen --no-install-project
+
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=0 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    RULE_GRAPH_EMBEDDING_MODEL_PATH=/opt/models/bge-base-zh-v1.5
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project
+COPY backend/pyproject.toml backend/uv.lock ./
+COPY --from=builder /app/.venv /app/.venv
 
-COPY alembic.ini ./
-COPY alembic ./alembic
-COPY app ./app
-COPY tests ./tests
+COPY external/models/bge-base-zh-v1.5 /opt/models/bge-base-zh-v1.5
+
+COPY backend/alembic.ini ./
+COPY backend/alembic ./alembic
+COPY backend/app ./app
+COPY backend/tests ./tests
 
 EXPOSE 8000
 

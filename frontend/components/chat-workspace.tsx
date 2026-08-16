@@ -18,6 +18,8 @@ import {
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { AgentDebugModal } from "@/components/agent-debug-modal";
 import {
@@ -62,6 +64,25 @@ function formatUpdatedAt(value: string): string {
     month: "numeric",
     day: "numeric",
   }).format(date);
+}
+
+function MarkdownAnswer({ content, streaming = false }: { content: string; streaming?: boolean }) {
+  return (
+    <div className={`chat-markdown${streaming ? " is-streaming" : ""}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        components={{
+          a: ({ href, children }) => (
+            <a href={href} rel="noreferrer" target="_blank">{children}</a>
+          ),
+        }}
+      >
+        {content.trimStart()}
+      </ReactMarkdown>
+      {streaming && <span className="chat-stream-caret" aria-hidden="true" />}
+    </div>
+  );
 }
 
 export function ChatWorkspace() {
@@ -387,7 +408,9 @@ export function ChatWorkspace() {
               <article className={`chat-message is-${message.role}`} key={message.id}>
                 <span>{message.role === "assistant" ? <Bot size={17} /> : <UserRound size={17} />}</span>
                 <div className="chat-message-body">
-                  <p>{message.role === "assistant" ? message.content.trimStart() : message.content}</p>
+                  {message.role === "assistant"
+                    ? <MarkdownAnswer content={message.content} />
+                    : <p>{message.content}</p>}
                   {message.role === "assistant" && user.role === "admin" && message.trace_available && (
                     <footer className="chat-message-actions">
                       <button
@@ -414,7 +437,7 @@ export function ChatWorkspace() {
                   <span><Bot size={17} /></span>
                   {streamedContent ? (
                     <div className="chat-message-body chat-streaming-answer" aria-live="polite">
-                      <p>{streamedContent}<span className="chat-stream-caret" aria-hidden="true" /></p>
+                      <MarkdownAnswer content={streamedContent} streaming />
                       <small>{streamActivity}</small>
                     </div>
                   ) : (

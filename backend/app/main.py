@@ -21,16 +21,24 @@ from .config import app_environment
 from .evals.mingli_bench.worker import evaluation_task_manager
 from .graph_organizer_worker import graph_organizer_task_manager
 from .graph_store import GraphStoreUnavailable, graph_store
+from .rule_graph_search import RuleGraphEmbeddingUnavailable, rule_graph_hybrid_search
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    graph_available = False
     try:
         await graph_store.start()
+        graph_available = True
     except GraphStoreUnavailable:
         logger.warning("Neo4j 规则图谱当前不可用；其他应用功能继续启动")
+    if graph_available:
+        try:
+            await rule_graph_hybrid_search.warm(await graph_store.list_rule_summaries())
+        except RuleGraphEmbeddingUnavailable as exc:
+            logger.warning("%s；规则搜索暂时仅使用精确匹配和 BM25", exc)
     try:
         await evaluation_task_manager.start()
         try:

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import httpx
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_tools import AgentTool, AgentToolRegistry
 from app.auth import AuthRepository, hash_password
+from app.bazi.tool import BaziChartToolInput
 from app.chat_agent import ChatAgentResult, run_chat_agent
 from app.conversations import ConversationRepository
 from app.models import ModelCredential
@@ -317,6 +319,59 @@ async def test_general_chat_registers_chart_and_fortune_tools() -> None:
 
     assert observed_tools == ["calculate_bazi_chart", "calculate_fortune_at"]
     assert answer.output_text == "一般知识回答"
+
+
+@pytest.mark.asyncio
+async def test_bound_chat_prompt_anchors_the_authoritative_chart() -> None:
+    observed: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "命盘回答"}],
+                    }
+                ]
+            },
+        )
+
+    credential = ModelCredential(
+        scope="test",
+        user_id=None,
+        provider="openai",
+        api_protocol="responses",
+        model="test-model",
+        base_url="https://example.test/v1",
+        encrypted_api_key="unused",
+        api_key_last_four="test",
+        encryption_key_version="test",
+    )
+    chart_input = BaziChartToolInput(
+        gender="male",
+        true_solar_datetime=datetime(1974, 4, 28, 16, 40),
+    )
+    await run_chat_agent(
+        credential=credential,
+        api_key="sk-test",
+        user_message="看看事业",
+        history=(),
+        chart_input=chart_input,
+        capabilities=(),
+        transport=httpx.MockTransport(handler),
+    )
+
+    prompt = observed["instructions"]
+    assert "【本会话已绑定命盘】" in prompt
+    assert "固定对象：男命；四柱索引：" in prompt
+    assert "日主：" in prompt
+    assert "gender=male" in prompt
+    assert "true_solar_datetime=1974-04-28T16:40:00" in prompt
+    assert "不要再次询问已经绑定的" in prompt
+    assert "分析另一张命盘" in prompt
 
 
 @pytest.mark.asyncio

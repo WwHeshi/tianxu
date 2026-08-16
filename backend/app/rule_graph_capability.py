@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from math import log2
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
@@ -17,6 +16,11 @@ from .graph_store import (
     GraphRuleSummary,
     GraphStore,
     normalize_graph_key,
+)
+from .rule_graph_search import (
+    HybridSearchHit,
+    RuleGraphHybridSearch,
+    rule_graph_hybrid_search,
 )
 
 RULE_GRAPH_CAPABILITY_NAME = "rule_graph_read"
@@ -167,23 +171,6 @@ def _query_terms(query: str) -> tuple[str, ...]:
     return tuple(terms)
 
 
-def _semantic_frequencies(
-    rules: tuple[GraphRuleSummary, ...],
-) -> dict[tuple[str, str], int]:
-    frequencies: dict[tuple[str, str], int] = {}
-    for rule in rules:
-        for kind, values in (
-            ("Concept", rule.concepts),
-            ("Condition", rule.conditions),
-            ("Outcome", rule.outcomes),
-        ):
-            keys = {normalize_graph_key(value) for value in values}
-            for key in keys - {""}:
-                frequency_key = (kind, key)
-                frequencies[frequency_key] = frequencies.get(frequency_key, 0) + 1
-    return frequencies
-
-
 def _search_evidence(
     query: str,
     rule: GraphRuleSummary,
@@ -250,59 +237,20 @@ def _search_evidence(
     )
 
 
-def _score_rule_search(
+def _hybrid_scored_rule(
     query: str,
     rule: GraphRuleSummary,
-    semantic_frequencies: dict[tuple[str, str], int],
+    hit: HybridSearchHit,
 ) -> _ScoredRule:
-    matched_on = _search_evidence(query, rule)
-    if not matched_on:
-        return _ScoredRule(rule=rule, score=0, matched_on=())
-
-    terms = _query_terms(query)
-    searchable_keys = tuple(
-        normalize_graph_key(value)
-        for value in (
-            rule.name,
-            *rule.aliases,
-            rule.summary,
-            *rule.concepts,
-            *rule.conditions,
-            *rule.outcomes,
-        )
-        if normalize_graph_key(value)
-    )
-    covered_terms = {
-        term
-        for term in terms
-        if any(term in value or value in term for value in searchable_keys)
-    }
-    coverage_bonus = len(covered_terms) * 5
-    if len(terms) > 1 and len(covered_terms) == len(terms):
-        coverage_bonus += 20
-
-    specificity_bonus = 0
-    for match in matched_on:
-        if match.match != "exact":
-            continue
-        if match.kind in {"Rule", "Alias"}:
-            specificity_bonus = max(specificity_bonus, 20)
-            continue
-        frequency = semantic_frequencies.get(
-            (match.kind, normalize_graph_key(match.name))
-        )
-        if frequency:
-            specificity_bonus = max(
-                specificity_bonus,
-                round(20 / log2(frequency + 1)),
-            )
-
+    matched_on = list(_search_evidence(query, rule))
+    if not matched_on and hit.bm25_rank is not None:
+        matched_on.append(_SearchEvidence("BM25", query, "partial", 0))
+    if not matched_on and hit.vector_rank is not None:
+        matched_on.append(_SearchEvidence("Vector", rule.name, "partial", 0))
     return _ScoredRule(
         rule=rule,
-        score=max(item.base_score for item in matched_on)
-        + coverage_bonus
-        + specificity_bonus,
-        matched_on=matched_on,
+        score=hit.score,
+        matched_on=tuple(matched_on),
     )
 
 
@@ -428,8 +376,14 @@ def _project_search_rule(
 class RuleGraphReadCapability:
     """Live keyword search and free read-only Cypher for one Agent run."""
 
-    def __init__(self, store: GraphStore) -> None:
+    def __init__(
+        self,
+        store: GraphStore,
+        *,
+        search_engine: RuleGraphHybridSearch | None = None,
+    ) -> None:
         self.store = store
+        self.search_engine = search_engine or rule_graph_hybrid_search
 
     @property
     def name(self) -> str:
@@ -443,8 +397,8 @@ class RuleGraphReadCapability:
             AgentTool(
                 name="search_rule_graph",
                 description=(
-                    "实时批量查询 Neo4j。规则名称、别名、摘要及其关联的概念、条件和结论都会"
-                    "参与匹配；每个查询返回最相关的五条规则及其完整局部图谱。"
+                    "实时批量查询 Neo4j。规则名称和别名精确匹配置顶，再融合中文 BM25 与"
+                    "本地语义向量排名；每个查询返回最相关的五条规则及其完整局部图谱。"
                 ),
                 input_schema=SearchRuleGraphInput.model_json_schema(),
                 input_model=SearchRuleGraphInput,
@@ -463,23 +417,17 @@ class RuleGraphReadCapability:
     async def _search(self, tool_input: BaseModel) -> SearchRuleGraphOutput:
         queries = SearchRuleGraphInput.model_validate(tool_input).queries
         rules = await self.store.list_rule_summaries()
-        semantic_frequencies = _semantic_frequencies(rules)
+        rules_by_id = {rule.id: rule for rule in rules}
+        hits_by_query = await self.search_engine.search(tuple(queries), rules)
         ranked_by_query = [
             (
                 query,
                 tuple(
-                    scored_rule
-                    for scored_rule in sorted(
-                        (
-                            _score_rule_search(query, rule, semantic_frequencies)
-                            for rule in rules
-                        ),
-                        key=lambda item: (-item.score, item.rule.name, item.rule.id),
-                    )[:5]
-                    if scored_rule.score > 0
+                    _hybrid_scored_rule(query, rules_by_id[hit.rule_id], hit)
+                    for hit in hits
                 ),
             )
-            for query in queries
+            for query, hits in zip(queries, hits_by_query, strict=True)
         ]
         matched_rule_ids = tuple(
             dict.fromkeys(
